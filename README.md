@@ -41,14 +41,11 @@ Copy the generated URL (e.g., `https://abc123.ngrok.io`)
 In Cursor IDE:
 1. Open **Settings** → **Models** → **Advanced**
 2. **Override OpenAI Base URL**: `https://your-ngrok-url.ngrok.io` (from step 2)
-3. **Model**: select or enter a custom model (e.g., `my-agent`)
+3. **Model**: use any model name (will be automatically routed to gpt-5)
 
 ### 4. Configuration (Optional)
 
 ```bash
-# Model aliases
-export MODEL_ALIASES="my-agent=gpt-5,custom-gpt=gpt-4"
-
 # API key (if not passed through Cursor)
 export OPENAI_API_KEY=sk-...
 ```
@@ -102,8 +99,7 @@ Each event is logged in JSON format:
 ```
 
 ### Events:
-- `incoming_request` - request from Cursor
-- `forwarded_request` - request to OpenAI  
+- `incoming_request` - request from Cursor (includes full payload)
 - `response` - response from OpenAI
 - `retry_scheduled` - retry attempts on rate limits
 - `error` - errors
@@ -115,7 +111,7 @@ Each event is logged in JSON format:
 - ✅ **Automatic retries** on rate limits (429)
 - ✅ **Tool calls analysis** from model
 - ✅ **Security** - API key masking in logs
-- ✅ **Model aliases** for convenience
+- ✅ **Fixed gpt-5 routing** - all requests go to gpt-5
 - ✅ **JSON formatting** with indentation
 
 ## Requirements

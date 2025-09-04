@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from core.config import config
 from utils.auth import resolve_auth
-from utils.models import resolve_model, sanitize_payload
+from utils.models import sanitize_payload
 from handlers.proxy_client import proxy_stream, proxy_json
 from utils.logging_utils import log_event
 
@@ -18,7 +18,6 @@ async def chat_completions(req: Request, authorization: Optional[str] = Header(N
     """Handle chat completions requests to OpenAI API."""
     body = await req.json()
     auth = resolve_auth(req, authorization, body)
-    body["model"] = resolve_model(body.get("model"))
     body = sanitize_payload(body)
 
     # Check if request contains tool results (executed tool outputs)
@@ -52,7 +51,6 @@ async def responses(req: Request, authorization: Optional[str] = Header(None)):
     """Handle responses API requests to OpenAI API."""
     body = await req.json()
     auth = resolve_auth(req, authorization, body)
-    body["model"] = resolve_model(body.get("model"))
     body = sanitize_payload(body)
 
     # Check if request contains tool results (executed tool outputs)

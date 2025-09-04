@@ -12,21 +12,12 @@ class ProxyConfig:
         self.openai_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com")
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         
-        # Models
-        self.default_model = os.getenv("DEFAULT_MODEL", "gpt-5")
+        # Models - fixed to gpt-5 only
+        self.default_model = "gpt-5"
         self.max_log_text = int(os.getenv("MAX_LOG_TEXT", "2000000"))
-        
-        # Parse model aliases
-        model_aliases_env = os.getenv("MODEL_ALIASES", "my-agent=gpt-5")
-        self.model_aliases: Dict[str, str] = {}
-        for pair in model_aliases_env.split(","):
-            if "=" in pair:
-                a, b = pair.split("=", 1)
-                self.model_aliases[a.strip()] = b.strip()
         
         # Log startup configuration
         log_event("startup", {
-            "MODEL_ALIASES": self.model_aliases, 
             "DEFAULT_MODEL": self.default_model
         })
 

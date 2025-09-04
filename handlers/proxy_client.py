@@ -23,7 +23,6 @@ from utils.http_utils import extract_openai_headers
 
 async def proxy_json(url: str, headers: Dict[str, str], payload: Dict[str, Any]):
     """Proxy non-streaming requests to OpenAI API with detailed logging."""
-    log_event("forwarded_request", {"url": url, "headers": redact_headers(headers), "payload": payload})
 
     async with httpx.AsyncClient(timeout=None) as client:
         for attempt in range(RETRY_MAX + 1):

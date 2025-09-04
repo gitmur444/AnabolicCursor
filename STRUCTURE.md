@@ -53,7 +53,7 @@ AnabolicCursor/
 - **`auth.py`**: Authentication handling (Bearer tokens, API keys)
 - **`http_utils.py`**: HTTP utilities and error handling
 - **`logging_utils.py`**: Structured JSON logging with pretty printing
-- **`models.py`**: Model management and payload sanitization
+- **`models.py`**: Payload sanitization for gpt-5
 - **`retry_utils.py`**: Retry mechanisms with exponential backoff
 
 ### 📁 Parsers (`parsers/`)
@@ -77,9 +77,8 @@ Environment variables:
 OPENAI_BASE_URL=https://api.openai.com
 OPENAI_API_KEY=your_api_key
 
-# Models
+# Models - fixed to gpt-5
 DEFAULT_MODEL=gpt-5
-MODEL_ALIASES=my-agent=gpt-5,custom=gpt-4
 
 # Logging
 MAX_LOG_TEXT=2000000
