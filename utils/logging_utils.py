@@ -1,3 +1,6 @@
+"""
+Logging utilities for the Cursor Proxy application.
+"""
 import os
 import time
 import json
@@ -6,19 +9,19 @@ from typing import Dict
 
 
 def setup_logging():
-    """Setup logging configuration for the proxy application."""
+    """Setup logging configuration for the application."""
     os.makedirs("logs", exist_ok=True)
     
     logging.basicConfig(
-        level=logging.INFO,  # INFO вместо DEBUG
-        format="%(message)s",  # пишем только JSON, без префиксов
+        level=logging.INFO,
+        format="%(message)s",
         handlers=[
             logging.FileHandler("logs/proxy.log", encoding="utf-8"),
-            logging.StreamHandler()
-        ]
+            logging.StreamHandler(),
+        ],
     )
     
-    # подавляем шум от httpx и httpcore
+    # Reduce httpx/httpcore noise
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     
@@ -29,14 +32,20 @@ logger = setup_logging()
 
 
 def log_event(event_type: str, data: dict):
-    """Log structured events as JSON with pretty formatting."""
+    """Log structured events as JSON with pretty formatting and readable newlines."""
     event = {
         "event": event_type,
         "timestamp": int(time.time()),
         "data": data,
     }
-    # Форматируем JSON красиво с отступами
-    logger.info(json.dumps(event, ensure_ascii=False, indent=2))
+    
+    # Convert to JSON with pretty formatting
+    json_str = json.dumps(event, ensure_ascii=False, indent=2)
+    
+    # Replace \\n with actual newlines for better readability in content fields
+    formatted_log = json_str.replace('\\n', '\n')
+    
+    logger.info(formatted_log)
 
 
 def redact_token(tok: str) -> str:
@@ -49,11 +58,11 @@ def redact_token(tok: str) -> str:
     return f"Bearer {t[:6]}…{t[-4:]}"
 
 
-def redact_headers(headers: Dict[str, str]) -> Dict[str, str]:
+def redact_headers(h: Dict[str, str]) -> Dict[str, str]:
     """Redact sensitive headers for safe logging."""
-    if not headers:
-        return headers
-    safe = dict(headers)
+    if not h:
+        return h
+    safe = dict(h)
     for k in list(safe.keys()):
         kl = k.lower()
         if kl in ("authorization", "x-openai-api-key", "openai-api-key", "x-api-key"):
