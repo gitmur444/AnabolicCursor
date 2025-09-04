@@ -60,7 +60,7 @@ async def proxy_json(url: str, headers: Dict[str, str], payload: Dict[str, Any])
 async def proxy_stream(url: str, headers: Dict[str, str], payload: Dict[str, Any]):
     """Proxy streaming requests to OpenAI API with detailed logging."""
     
-    # Накопители для финального лога
+    # Accumulators for final logging
     full_text_parts: List[str] = []
     usage = None
     finish_reason = None

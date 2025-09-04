@@ -21,21 +21,21 @@ async def chat_completions(req: Request, authorization: Optional[str] = Header(N
     body["model"] = resolve_model(body.get("model"))
     body = sanitize_payload(body)
 
-    # Проверяем есть ли tool results в запросе (результаты выполнения инструментов)
+    # Check if request contains tool results (executed tool outputs)
     has_tool_results = False
     if "messages" in body:
         for msg in body["messages"]:
             if msg.get("role") == "tool" or "tool_call_id" in msg:
                 has_tool_results = True
                 break
-    
+
     log_event("incoming_request", {
         "model": body.get("model"),
         "message_count": len(body.get("messages", [])),
         "has_tool_results": has_tool_results,
         "stream": body.get("stream", False),
         "tools_available": "tools" in body or "functions" in body,
-        "full_payload": body,  # Логируем весь запрос целиком
+        "full_payload": body,  # Log complete request payload
     })
 
     headers = {"Authorization": auth, "Content-Type": "application/json"}
@@ -55,21 +55,21 @@ async def responses(req: Request, authorization: Optional[str] = Header(None)):
     body["model"] = resolve_model(body.get("model"))
     body = sanitize_payload(body)
 
-    # Проверяем есть ли tool results в запросе (результаты выполнения инструментов)
+    # Check if request contains tool results (executed tool outputs)
     has_tool_results = False
     if "messages" in body:
         for msg in body["messages"]:
             if msg.get("role") == "tool" or "tool_call_id" in msg:
                 has_tool_results = True
                 break
-    
+
     log_event("incoming_request", {
         "model": body.get("model"),
         "message_count": len(body.get("messages", [])),
         "has_tool_results": has_tool_results,
         "stream": body.get("stream", False),
         "tools_available": "tools" in body or "functions" in body,
-        "full_payload": body,  # Логируем весь запрос целиком
+        "full_payload": body,  # Log complete request payload
     })
 
     headers = {"Authorization": auth, "Content-Type": "application/json"}

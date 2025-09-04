@@ -1,74 +1,90 @@
 # AnabolicCursor - OpenAI API Proxy
 
-Прокси-сервер для Cursor IDE, совместимый с OpenAI API. Перехватывает и логирует все запросы между Cursor и OpenAI для анализа и отладки.
+A proxy server for Cursor IDE, compatible with OpenAI API. Intercepts and logs all requests between Cursor and OpenAI for analysis and debugging.
 
-## Быстрый старт
+## Quick Start
 
-### 1. Установка и запуск
+### 1. Installation and Setup
 
 ```bash
 cd AnabolicCursor
 
-# Создать виртуальное окружение
+# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
-# Установить зависимости
+# Install dependencies
 pip install -r requirements.txt
 
-# Запустить прокси
+# Start proxy server
 uvicorn app:app --host 0.0.0.0 --port 8787 --reload
 ```
 
-### 2. Настройка Cursor
+### 2. Expose with Ngrok
 
-В Cursor IDE:
-1. Откройте **Settings** → **Models** → **Advanced**
-2. **Override OpenAI Base URL**: `http://localhost:8787`
-3. **Model**: выберите или введите кастомную модель (например, `my-agent`)
-
-### 3. Конфигурация (опционально)
+Since Cursor blocks localhost URLs, you need to expose the proxy through ngrok:
 
 ```bash
-# Алиасы моделей
+# Install ngrok if not already installed
+# Download from https://ngrok.com/download
+
+# In a NEW terminal window, expose local server
+ngrok http 8787
+```
+
+Copy the generated URL (e.g., `https://abc123.ngrok.io`)
+
+**Note**: Keep both terminals running - one for the proxy server, one for ngrok.
+
+### 3. Cursor Configuration
+
+In Cursor IDE:
+1. Open **Settings** → **Models** → **Advanced**
+2. **Override OpenAI Base URL**: `https://your-ngrok-url.ngrok.io` (from step 2)
+3. **Model**: select or enter a custom model (e.g., `my-agent`)
+
+### 4. Configuration (Optional)
+
+```bash
+# Model aliases
 export MODEL_ALIASES="my-agent=gpt-5,custom-gpt=gpt-4"
 
-# API ключ (если не передается через Cursor)
+# API key (if not passed through Cursor)
 export OPENAI_API_KEY=sk-...
 ```
 
-## Просмотр логов
+## Log Viewing
 
-### Основной способ
-Все логи сохраняются в файл:
+### Primary Method
+All logs are saved to file:
 ```bash
 tail -f logs/proxy.log | jq .
 ```
 
-### Мониторинг (BETA)
-Дополнительно доступен стек Grafana + Loki:
+### Monitoring (BETA)
+Additionally available Grafana + Loki stack:
 
 ```bash
-# Запустить мониторинг
+# Start monitoring
 docker-compose up -d
 
-# Открыть Grafana
+# Open Grafana
 open http://localhost:3000
-# Логин: admin / admin
+# Login: admin / admin
 ```
 
-В Grafana добавьте Loki data source: `http://loki:3100`
+In Grafana add Loki data source: `http://loki:3100`
 
-Примеры запросов:
+Example queries:
 ```
 {job="proxy"} | json | event="incoming_request"
 {job="proxy"} | json | event="response" 
 {job="proxy"} | json | model="gpt-5"
 ```
 
-## Структура логов
+## Log Structure
 
-Каждое событие логируется в JSON формате:
+Each event is logged in JSON format:
 
 ```json
 {
@@ -85,29 +101,29 @@ open http://localhost:3000
 }
 ```
 
-### События:
-- `incoming_request` - запрос от Cursor
-- `forwarded_request` - запрос к OpenAI  
-- `response` - ответ от OpenAI
-- `retry_scheduled` - повторные попытки при rate limits
-- `error` - ошибки
+### Events:
+- `incoming_request` - request from Cursor
+- `forwarded_request` - request to OpenAI  
+- `response` - response from OpenAI
+- `retry_scheduled` - retry attempts on rate limits
+- `error` - errors
 
-## Возможности
+## Features
 
-- ✅ **Полное логирование** всех запросов/ответов
-- ✅ **Поддержка streaming** (Server-Sent Events)
-- ✅ **Автоматические retry** при rate limits (429)
-- ✅ **Анализ tool calls** от модели
-- ✅ **Безопасность** - маскировка API ключей в логах
-- ✅ **Алиасы моделей** для удобства
-- ✅ **JSON форматирование** с отступами
+- ✅ **Complete logging** of all requests/responses
+- ✅ **Streaming support** (Server-Sent Events)
+- ✅ **Automatic retries** on rate limits (429)
+- ✅ **Tool calls analysis** from model
+- ✅ **Security** - API key masking in logs
+- ✅ **Model aliases** for convenience
+- ✅ **JSON formatting** with indentation
 
-## Требования
+## Requirements
 
 - Python 3.10+
 - Cursor IDE
-- OpenAI API ключ
+- OpenAI API key
 
-## Документация
+## Documentation
 
-Подробное описание архитектуры и модулей: [STRUCTURE.md](STRUCTURE.md)
+Detailed architecture and modules description: [STRUCTURE.md](STRUCTURE.md)
