@@ -1,0 +1,40 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: proxy
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: proxy
+          __path__: /logs/*.log
+
+    pipeline_stages:
+      # Склеиваем многострочные JSON (если запись оборвётся переносами)
+      - multiline:
+          firstline: '^{'
+          max_wait_time: 3s
+
+      # Вырезаем JSON из строки "cursor-proxy: STREAM payload: {...}"
+      - regex:
+          expression: '.*payload: (?P<json>{.*})'
+
+      # Парсим JSON
+      - json:
+          source: json
+          expressions:
+            model: model
+            user: user
+            messages: messages
+
+      # Уберём ошибки, если строка не JSON (например info/debug строки)
+      - drop:
+          expression: '^{.*JSONParserErr.*}$'
