@@ -42,9 +42,35 @@ def log_event(event_type: str, data: dict):
     # Convert to JSON with pretty formatting
     json_str = json.dumps(event, ensure_ascii=False, indent=2)
     
-    # Replace \\n with actual newlines for better readability in content fields
-    formatted_log = json_str.replace('\\n', '\n')
+    # Replace \\n with actual newlines while preserving indentation
+    lines = json_str.split('\n')
+    result_lines = []
     
+    for line in lines:
+        if '\\n' in line and '"content":' in line:
+            # This is a content line with escaped newlines
+            # Find the indentation by looking at spaces before the content value
+            before_content, after_content = line.split('"content": "', 1)
+            content_value, after_value = after_content.rsplit('"', 1)
+            
+            # Calculate indentation: just the spaces before "content" + 2 more spaces for alignment
+            base_spaces = len(before_content.replace('\t', '    '))  # Convert tabs to spaces
+            indent_str = ' ' * (base_spaces + 2)  # +2 for nice alignment under the opening quote
+            
+            # Split content by \\n and join with proper indentation
+            content_parts = content_value.split('\\n')
+            formatted_content = content_parts[0]  # First line as-is
+            for part in content_parts[1:]:
+                formatted_content += '\n' + indent_str + part
+            
+            # Reconstruct the line
+            new_line = before_content + '"content": "' + formatted_content + '"' + after_value
+            result_lines.append(new_line)
+        else:
+            # Regular line or content without \\n - just replace \\n normally
+            result_lines.append(line.replace('\\n', '\n'))
+    
+    formatted_log = '\n'.join(result_lines)
     logger.info(formatted_log)
 
 
