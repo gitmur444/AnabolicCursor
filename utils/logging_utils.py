@@ -47,24 +47,33 @@ def log_event(event_type: str, data: dict):
     result_lines = []
     
     for line in lines:
-        if '\\n' in line and '"content":' in line:
-            # This is a content line with escaped newlines
-            # Find the indentation by looking at spaces before the content value
-            before_content, after_content = line.split('"content": "', 1)
-            content_value, after_value = after_content.rsplit('"', 1)
+        # Check for fields that might contain multiline text
+        multiline_fields = ['"content":', '"description":', '"content_text":']
+        field_found = None
+        
+        for field in multiline_fields:
+            if '\\n' in line and field in line:
+                field_found = field
+                break
+        
+        if field_found:
+            # This is a multiline field with escaped newlines
+            field_name = field_found.strip(':')  # Remove the colon
+            before_field, after_field = line.split(field_found + ' "', 1)
+            field_value, after_value = after_field.rsplit('"', 1)
             
-            # Calculate indentation: just the spaces before "content" + 2 more spaces for alignment
-            base_spaces = len(before_content.replace('\t', '    '))  # Convert tabs to spaces
+            # Calculate indentation: just the spaces before field + 2 more spaces for alignment
+            base_spaces = len(before_field.replace('\t', '    '))  # Convert tabs to spaces
             indent_str = ' ' * (base_spaces + 2)  # +2 for nice alignment under the opening quote
             
-            # Split content by \\n and join with proper indentation
-            content_parts = content_value.split('\\n')
+            # Split field value by \\n and join with proper indentation
+            content_parts = field_value.split('\\n')
             formatted_content = content_parts[0]  # First line as-is
             for part in content_parts[1:]:
                 formatted_content += '\n' + indent_str + part
             
             # Reconstruct the line
-            new_line = before_content + '"content": "' + formatted_content + '"' + after_value
+            new_line = before_field + field_found + ' "' + formatted_content + '"' + after_value
             result_lines.append(new_line)
         else:
             # Regular line or content without \\n - just replace \\n normally
