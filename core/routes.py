@@ -83,3 +83,64 @@ async def responses(req: Request, authorization: Optional[str] = Header(None)):
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "proxy": "Cursor Proxy"}
+
+
+# ---- Cursor auxiliary endpoints (stubs to avoid 404 and to log payloads) ----
+
+@router.post("/v1/auth/exchange_user_api_key")
+async def exchange_user_api_key(req: Request):
+    """Stub: handle Cursor auth key exchange calls.
+
+    Logs payload and returns a minimal success structure to satisfy the client.
+    """
+    try:
+        body = await req.json()
+    except Exception:
+        body = None
+    log_event("cursor_aux_api", {"endpoint": "exchange_user_api_key", "payload": body})
+    return JSONResponse(content={"ok": True})
+
+
+@router.post("/v1/aiserver.v1.AnalyticsService/TrackEvents")
+async def analytics_track_events(req: Request):
+    """Stub: track analytics events from Cursor.
+
+    Accepts any JSON, logs it, returns success.
+    """
+    try:
+        body = await req.json()
+    except Exception:
+        body = None
+    log_event("cursor_aux_api", {"endpoint": "AnalyticsService.TrackEvents", "payload": body})
+    return JSONResponse(content={"ok": True})
+
+
+@router.post("/v1/aiserver.v1.DashboardService/GetUserPrivacyMode")
+async def dashboard_get_user_privacy_mode(req: Request):
+    """Stub: return a default privacy mode.
+
+    If Cursor expects a boolean or enum, provide a conservative default.
+    """
+    try:
+        body = await req.json()
+    except Exception:
+        body = None
+    log_event("cursor_aux_api", {"endpoint": "DashboardService.GetUserPrivacyMode", "payload": body})
+    return JSONResponse(content={"privacyMode": False})
+
+
+@router.post("/v1/aiserver.v1.AiService/NameAgent")
+async def ai_service_name_agent(req: Request):
+    """Stub: name agent endpoint.
+
+    Returns a fallback name and echoes any provided hint.
+    """
+    try:
+        body = await req.json()
+    except Exception:
+        body = None
+    log_event("cursor_aux_api", {"endpoint": "AiService.NameAgent", "payload": body})
+    hint = None
+    if isinstance(body, dict):
+        hint = body.get("name") or body.get("hint") or body.get("prompt")
+    return JSONResponse(content={"name": hint or "Agent"})

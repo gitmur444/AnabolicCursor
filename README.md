@@ -17,7 +17,10 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Start proxy server
-uvicorn app:app --host 0.0.0.0 --port 8787 --reload
+uvicorn core.app:app --host 0.0.0.0 --port 8787 --reload
+
+# Alternative (module form)
+python -m uvicorn core.app:app --host 0.0.0.0 --port 8787 --reload
 ```
 
 ### 2. Expose with Ngrok

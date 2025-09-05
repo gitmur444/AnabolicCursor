@@ -56,3 +56,5 @@ Thumbs.db
 # Loki/Grafana data
 loki/data/
 grafana/data/
+
+
