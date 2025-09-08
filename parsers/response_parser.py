@@ -60,7 +60,7 @@ def extract_text_from_streaming_chunk(obj: Dict[str, Any], current_event: Option
     piece = None
     
     # 1) OpenAI Chat Completions (SSE): choices[0].delta.content
-    if "choices" in obj:
+    if "choices" in obj and obj["choices"]:
         delta = (obj["choices"][0] or {}).get("delta", {})
         if isinstance(delta, dict) and isinstance(delta.get("content"), str):
             piece = delta["content"]
@@ -83,7 +83,10 @@ def extract_tool_calls_from_streaming_chunk(obj: Dict[str, Any]) -> List[Dict]:
     tool_calls_info = []
     
     try:
-        ch0 = (obj.get("choices") or [{}])[0]
+        choices = obj.get("choices", [])
+        if not choices:
+            return tool_calls_info
+        ch0 = choices[0] or {}
         delta = ch0.get("delta", {})
         if delta.get("tool_calls"):
             for tool_call in delta["tool_calls"]:
@@ -102,7 +105,10 @@ def extract_tool_calls_from_streaming_chunk(obj: Dict[str, Any]) -> List[Dict]:
 def extract_finish_reason_from_chunk(obj: Dict[str, Any]) -> Optional[str]:
     """Extract finish_reason from streaming chunk."""
     try:
-        ch0 = (obj.get("choices") or [{}])[0]
+        choices = obj.get("choices", [])
+        if not choices:
+            return None
+        ch0 = choices[0] or {}
         return ch0.get("finish_reason")
     except Exception:
         return None

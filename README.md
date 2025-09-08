@@ -4,7 +4,44 @@ A proxy server for Cursor IDE, compatible with OpenAI API. Intercepts and logs a
 
 ## Quick Start
 
-### 1. Installation and Setup
+### 🚀 One-Command Setup (Recommended)
+
+```bash
+cd AnabolicCursor
+
+# 1. Install dependencies (first time only)
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Add your OpenAI API key to .env file
+# .env file is already created with your key, or create it:
+# echo "OPENAI_API_KEY=your_api_key_here" > .env
+
+# 3. Start everything with one command
+./start.sh
+```
+
+The script will automatically:
+- Start ngrok tunnel
+- Start proxy server  
+- Display the ngrok URL for Cursor configuration
+- Show live logs
+
+### 📋 Cursor Configuration
+
+When `start.sh` shows the ngrok URL, configure Cursor:
+
+1. Open **Settings** → **Models** → **Advanced**
+2. **Override OpenAI Base URL**: `https://your-ngrok-url.ngrok.io` (from start.sh output)
+3. **Model**: use any model name (will be automatically routed to gpt-5)
+
+### ⚙️ Manual Setup (Advanced)
+
+<details>
+<summary>Click to expand manual setup instructions</summary>
+
+#### 1. Installation and Setup
 
 ```bash
 cd AnabolicCursor
@@ -18,12 +55,9 @@ pip install -r requirements.txt
 
 # Start proxy server
 uvicorn core.app:app --host 0.0.0.0 --port 8787 --reload
-
-# Alternative (module form)
-python -m uvicorn core.app:app --host 0.0.0.0 --port 8787 --reload
 ```
 
-### 2. Expose with Ngrok
+#### 2. Expose with Ngrok
 
 Since Cursor blocks localhost URLs, you need to expose the proxy through ngrok:
 
@@ -39,17 +73,33 @@ Copy the generated URL (e.g., `https://abc123.ngrok.io`)
 
 **Note**: Keep both terminals running - one for the proxy server, one for ngrok.
 
-### 3. Cursor Configuration
+</details>
 
-In Cursor IDE:
-1. Open **Settings** → **Models** → **Advanced**
-2. **Override OpenAI Base URL**: `https://your-ngrok-url.ngrok.io` (from step 2)
-3. **Model**: use any model name (will be automatically routed to gpt-5)
+### 🔑 Configuration
 
-### 4. Configuration (Optional)
+#### Using .env file (Recommended)
+
+Create or edit `.env` file in project root:
 
 ```bash
-# API key (if not passed through Cursor)
+# OpenAI API Configuration  
+OPENAI_API_KEY=your_api_key_here
+OPENAI_BASE_URL=https://api.openai.com
+
+# Proxy Configuration
+DEFAULT_MODEL=gpt-5
+MAX_LOG_TEXT=2000000
+
+# Retry Configuration
+RETRY_MAX=3
+RETRY_BASE_SECONDS=1.5
+RETRY_MAX_SECONDS=20
+```
+
+#### Using Environment Variables (Alternative)
+
+```bash
+# API key (if not using .env file)
 export OPENAI_API_KEY=sk-...
 ```
 

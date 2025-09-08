@@ -50,24 +50,3 @@ def extract_openai_headers(response: httpx.Response) -> Dict[str, Optional[str]]
     }
 
 
-async def execute_with_retry(client: httpx.AsyncClient, method: str, url: str, headers: Dict[str, str], payload: Dict[str, Any], is_stream: bool = False):
-    """Execute HTTP request with retry logic."""
-    for attempt in range(RETRY_MAX + 1):
-        if is_stream:
-            response_ctx = client.stream(method, url, headers=headers, json=payload)
-        else:
-            # For non-streaming, we'll handle it differently
-            response = await client.request(method, url, headers=headers, json=payload)
-            
-            # Handle retryable errors
-            if await handle_retryable_error(response, attempt):
-                continue  # retry
-            
-            # Handle other errors
-            await handle_error_response(response)
-            
-            return response  # успешный ответ
-            
-    if is_stream:
-        # For streaming, we need to handle retry logic in the calling function
-        return response_ctx

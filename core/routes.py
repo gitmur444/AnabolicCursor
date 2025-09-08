@@ -13,9 +13,8 @@ from utils.logging_utils import log_event
 router = APIRouter()
 
 
-@router.post("/v1/chat/completions")
-async def chat_completions(req: Request, authorization: Optional[str] = Header(None)):
-    """Handle chat completions requests to OpenAI API."""
+async def _handle_proxy_request(req: Request, authorization: Optional[str], endpoint: str):
+    """Common logic for handling proxy requests."""
     body = await req.json()
     auth = resolve_auth(req, authorization, body)
     body = sanitize_payload(body)
@@ -38,45 +37,24 @@ async def chat_completions(req: Request, authorization: Optional[str] = Header(N
     })
 
     headers = {"Authorization": auth, "Content-Type": "application/json"}
-    url = f"{config.openai_base_url}/v1/chat/completions"
+    url = f"{config.openai_base_url}{endpoint}"
 
     if body.get("stream"):
         return StreamingResponse(proxy_stream(url, headers, body), media_type="text/event-stream")
     data = await proxy_json(url, headers, body)
     return JSONResponse(content=data)
+
+
+@router.post("/v1/chat/completions")
+async def chat_completions(req: Request, authorization: Optional[str] = Header(None)):
+    """Handle chat completions requests to OpenAI API."""
+    return await _handle_proxy_request(req, authorization, "/v1/chat/completions")
 
 
 @router.post("/v1/responses")
 async def responses(req: Request, authorization: Optional[str] = Header(None)):
     """Handle responses API requests to OpenAI API."""
-    body = await req.json()
-    auth = resolve_auth(req, authorization, body)
-    body = sanitize_payload(body)
-
-    # Check if request contains tool results (executed tool outputs)
-    has_tool_results = False
-    if "messages" in body:
-        for msg in body["messages"]:
-            if msg.get("role") == "tool" or "tool_call_id" in msg:
-                has_tool_results = True
-                break
-
-    log_event("incoming_request", {
-        "model": body.get("model"),
-        "message_count": len(body.get("messages", [])),
-        "has_tool_results": has_tool_results,
-        "stream": body.get("stream", False),
-        "tools_available": "tools" in body or "functions" in body,
-        "full_payload": body,  # Log complete request payload
-    })
-
-    headers = {"Authorization": auth, "Content-Type": "application/json"}
-    url = f"{config.openai_base_url}/v1/responses"
-
-    if body.get("stream"):
-        return StreamingResponse(proxy_stream(url, headers, body), media_type="text/event-stream")
-    data = await proxy_json(url, headers, body)
-    return JSONResponse(content=data)
+    return await _handle_proxy_request(req, authorization, "/v1/responses")
 
 
 @router.get("/")
