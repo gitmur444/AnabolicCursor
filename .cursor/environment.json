@@ -1,6 +1,6 @@
 {
   "snapshot": "snapshot-20250905-217b5460-b217-44ce-b7ad-5198d3f59b07",
-  "install": "\n",
-  "start": "\n",
+  "install": "bash .cursor/install.sh",
+  "start": "true",
   "terminals": []
 }
