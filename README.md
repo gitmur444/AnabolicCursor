@@ -183,4 +183,4 @@ Each event is logged in JSON format:
 Detailed architecture and modules description: [STRUCTURE.md](STRUCTURE.md)
 
 
-This line is for BugBot review
+This line is for BugBot review - BugBot with bugs
