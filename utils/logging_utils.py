@@ -17,7 +17,6 @@ def setup_logging():
         format="%(message)s",
         handlers=[
             logging.FileHandler("logs/proxy.log", encoding="utf-8"),
-            logging.StreamHandler(),
         ],
     )
     

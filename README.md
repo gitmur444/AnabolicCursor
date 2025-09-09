@@ -2,6 +2,11 @@
 
 A proxy server for Cursor IDE, compatible with OpenAI API. Intercepts and logs all requests between Cursor and OpenAI for analysis and debugging.
 
+<p align="center">
+  <img src="images/WorkFlow.png" alt="Workflow diagram" width="100%" />
+  
+</p>
+
 ## Quick Start
 
 ### 🚀 One-Command Setup (Recommended)

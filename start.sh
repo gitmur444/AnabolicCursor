@@ -48,8 +48,8 @@ echo "🖥️  Starting proxy server..."
 source venv/bin/activate
 pip install -q python-dotenv 2>/dev/null || true
 
-# Start proxy server  
-uvicorn core.app:app --host 0.0.0.0 --port 8787 --reload > /dev/null 2>&1 &
+# Start proxy server (let logs go to the file, suppress only uvicorn startup noise)
+uvicorn core.app:app --host 0.0.0.0 --port 8787 --reload --log-level warning &
 PROXY_PID=$!
 
 # Wait for proxy to be ready
@@ -79,7 +79,5 @@ cleanup() {
 # Handle Ctrl+C
 trap cleanup SIGINT
 
-# Monitor logs with clean event output
-tail -f logs/proxy.log 2>/dev/null | grep -oE '"event":\s*"[^"]*"' | sed 's/"event":\s*"//; s/"//' | while read event; do
-    echo "[$(date +'%H:%M:%S')] $event"
-done || sleep infinity
+# Keep process running
+sleep 86400
