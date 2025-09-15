@@ -1,0 +1,67 @@
+name: Deploy Infra and Stack
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+        with:
+          repository: gitmur444/AnabolicInfra
+          path: infra
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: eu-central-1
+      - name: Terraform Apply
+        working-directory: infra/infra/terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve
+      - name: Get public IP
+        id: ip
+        working-directory: infra/infra/terraform
+        run: |
+          echo "ip=$(terraform output -raw public_ip)" >> $GITHUB_OUTPUT
+      - name: Sync stack files
+        run: |
+          IP=${{ steps.ip.outputs.ip }}
+          echo "Deploy to $IP"
+          mkdir -p ~/.ssh
+          echo "${{ secrets.LIGHTSAIL_SSH_KEY }}" > ~/.ssh/anabolic
+          chmod 600 ~/.ssh/anabolic
+          RSYNC_RSH="ssh -i ~/.ssh/anabolic -o StrictHostKeyChecking=no"
+          rsync -avz infra/infra/stack/ ubuntu@${IP}:/opt/stack/
+      - name: Fetch secrets from SSM and start stack
+        run: |
+          IP=${{ steps.ip.outputs.ip }}
+          ANTHROPIC=$(aws ssm get-parameter --region eu-central-1 --name "/anabolic/litellm/ANTHROPIC_API_KEY" --with-decryption --query "Parameter.Value" --output text)
+          PROXY=$(aws ssm get-parameter --region eu-central-1 --name "/anabolic/litellm/LITELLM_PROXY_API_KEY" --with-decryption --query "Parameter.Value" --output text)
+          ssh -i ~/.ssh/anabolic -o StrictHostKeyChecking=no ubuntu@${IP} "bash -s" <<'SSH'
+          set -e
+          cd /opt/stack
+          # write .env
+          cat > .env <<ENV
+          ANTHROPIC_API_KEY=__ANTHROPIC__
+          LITELLM_PROXY_API_KEY=__PROXY__
+          ENV
+          sed -i 's/__ANTHROPIC__/'"$(printf %s "$ANTHROPIC" | sed 's/[\&/]/\\&/g')"'/' .env
+          sed -i 's/__PROXY__/'"$(printf %s "$PROXY" | sed 's/[\&/]/\\&/g')"'/' .env
+          chmod 600 .env
+          export $(cat .env | xargs)
+          docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions || true
+          docker compose pull || true
+          docker compose up -d
+          SSH
