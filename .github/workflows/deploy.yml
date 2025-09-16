@@ -17,6 +17,14 @@ jobs:
           git clone --depth=1 --branch main \
             https://x-access-token:${{ secrets.INFRA_REPO_TOKEN }}@github.com/gitmur444/AnabolicInfra.git \
             infra
+      - name: Prepare Lightsail SSH public key for Terraform
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          echo "${{ secrets.LIGHTSAIL_SSH_KEY }}" > ~/.ssh/anabolic
+          chmod 600 ~/.ssh/anabolic
+          mkdir -p infra/infra/keys
+          ssh-keygen -y -f ~/.ssh/anabolic > infra/infra/keys/anabolic.pub
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
