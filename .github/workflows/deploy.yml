@@ -11,11 +11,12 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout infra repo
-        uses: actions/checkout@v4
-        with:
-          repository: gitmur444/AnabolicInfra
-          path: infra
+      - name: Clone infra repo (PAT)
+        run: |
+          set -e
+          git clone --depth=1 --branch main \
+            https://x-access-token:${{ secrets.INFRA_REPO_TOKEN }}@github.com/gitmur444/AnabolicInfra.git \
+            infra
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
