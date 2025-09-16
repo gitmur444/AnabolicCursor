@@ -58,3 +58,8 @@ loki/data/
 grafana/data/
 
 
+
+# Local secrets
+.env
+# Real config kept local
+litellm_config.yaml
