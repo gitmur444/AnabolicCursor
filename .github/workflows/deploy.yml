@@ -21,14 +21,21 @@ jobs:
         run: |
           set -e
           mkdir -p ~/.ssh
+          KEY_PATH=~/.ssh/anabolic
           if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
-            echo "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/anabolic
+            if echo "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | base64 -d > "$KEY_PATH" 2>/dev/null; then
+              echo "Decoded base64 private key"
+            else
+              printf "%s" "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | tr -d '\r' > "$KEY_PATH"
+            fi
+          elif [ -n "${{ secrets.LIGHTSAIL_SSH_KEY }}" ]; then
+            printf "%s" "${{ secrets.LIGHTSAIL_SSH_KEY }}" | tr -d '\r' > "$KEY_PATH"
           else
-            echo "${{ secrets.LIGHTSAIL_SSH_KEY }}" | tr -d '\r' > ~/.ssh/anabolic
+            echo "No LIGHTSAIL_SSH_KEY(_B64) provided" >&2; exit 1
           fi
-          chmod 600 ~/.ssh/anabolic
+          chmod 600 "$KEY_PATH"
           mkdir -p infra/infra/keys
-          ssh-keygen -y -f ~/.ssh/anabolic > infra/infra/keys/anabolic.pub
+          ssh-keygen -y -f "$KEY_PATH" > infra/infra/keys/anabolic.pub
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -61,21 +68,28 @@ jobs:
           IP=${{ steps.ip.outputs.ip }}
           echo "Deploy to $IP"
           mkdir -p ~/.ssh
+          KEY_PATH=~/.ssh/anabolic
           if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
-            echo "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/anabolic
+            if echo "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | base64 -d > "$KEY_PATH" 2>/dev/null; then
+              echo "Decoded base64 private key"
+            else
+              printf "%s" "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | tr -d '\r' > "$KEY_PATH"
+            fi
+          elif [ -n "${{ secrets.LIGHTSAIL_SSH_KEY }}" ]; then
+            printf "%s" "${{ secrets.LIGHTSAIL_SSH_KEY }}" | tr -d '\r' > "$KEY_PATH"
           else
-            echo "${{ secrets.LIGHTSAIL_SSH_KEY }}" | tr -d '\r' > ~/.ssh/anabolic
+            echo "No LIGHTSAIL_SSH_KEY(_B64) provided" >&2; exit 1
           fi
-          chmod 600 ~/.ssh/anabolic
+          chmod 600 "$KEY_PATH"
           ssh-keyscan -H $IP >> ~/.ssh/known_hosts 2>/dev/null || true
           # Wait for SSH to become ready after instance replacement
           for i in {1..30}; do
-            if ssh -i ~/.ssh/anabolic -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ubuntu@${IP} "echo ok" >/dev/null 2>&1; then
+            if ssh -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ubuntu@${IP} "echo ok" >/dev/null 2>&1; then
               break
             fi
             echo "Waiting for SSH... ($i)"; sleep 5;
           done
-          export RSYNC_RSH="ssh -i ~/.ssh/anabolic -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          export RSYNC_RSH="ssh -i $KEY_PATH -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
           rsync -avz infra/infra/stack/ ubuntu@${IP}:/opt/stack/
       - name: Fetch secrets from SSM and start stack
         run: |
