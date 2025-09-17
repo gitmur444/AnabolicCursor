@@ -11,13 +11,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Clone infra repo (PAT)
+      - name: Clone infra repo
         run: |
           set -e
           git clone --depth=1 --branch main \
             https://x-access-token:${{ secrets.INFRA_REPO_TOKEN }}@github.com/gitmur444/AnabolicInfra.git \
             infra
-      - name: Prepare Lightsail SSH public key for Terraform
+      
+      - name: Prepare SSH key and generate public key
         run: |
           set -e
           mkdir -p ~/.ssh
@@ -29,52 +30,25 @@ jobs:
             echo "SSH private key decoded from LIGHTSAIL_SSH_KEY_B64"
           else
             echo "ERROR: LIGHTSAIL_SSH_KEY_B64 secret not found" >&2
-            echo "Please ensure the base64-encoded SSH private key is stored in LIGHTSAIL_SSH_KEY_B64" >&2
-            exit 1
-          fi
-          
-          # Validate key format
-          echo "Key file size: $(wc -c < "$KEY_PATH") bytes"
-          if ! grep -q "BEGIN.*PRIVATE KEY" "$KEY_PATH"; then
-            echo "ERROR: Key missing BEGIN header"
-            head -1 "$KEY_PATH"
             exit 1
           fi
           
           chmod 600 "$KEY_PATH"
           
-          # Debug the key before trying to use it
-          echo "=== DEBUGGING SSH KEY ==="
-          echo "Key file exists: $([ -f "$KEY_PATH" ] && echo "YES" || echo "NO")"
-          echo "Key permissions: $(ls -la "$KEY_PATH" 2>/dev/null || echo "N/A")"
-          echo "First 3 lines:"
-          head -3 "$KEY_PATH" | cat -A
-          echo "Last 3 lines:"
-          tail -3 "$KEY_PATH" | cat -A
-          echo "Line count: $(wc -l < "$KEY_PATH")"
-          echo "Character count: $(wc -c < "$KEY_PATH")"
-          echo "==========================="
-          
-          # Try to generate public key from private key
+          # Generate public key for Terraform
           mkdir -p infra/infra/keys
-          if ssh-keygen -y -f "$KEY_PATH" > infra/infra/keys/anabolic.pub 2>&1; then
-            echo "Generated public key for Terraform successfully"
-            
-            # Verify the generated public key matches our private key
-            GENERATED_FINGERPRINT=$(ssh-keygen -lf infra/infra/keys/anabolic.pub | cut -d' ' -f2)
-            PRIVATE_FINGERPRINT=$(ssh-keygen -lf "$KEY_PATH" | cut -d' ' -f2)
-            echo "Private key fingerprint: $PRIVATE_FINGERPRINT"
-            echo "Generated public key fingerprint: $GENERATED_FINGERPRINT"
-            
-            if [ "$GENERATED_FINGERPRINT" = "$PRIVATE_FINGERPRINT" ]; then
-              echo "✅ Public key correctly matches private key"
-            else
-              echo "❌ ERROR: Generated public key doesn't match private key!"
-              exit 1
-            fi
+          ssh-keygen -y -f "$KEY_PATH" > infra/infra/keys/anabolic.pub
+          
+          # Verify fingerprints match
+          LOCAL_FINGERPRINT=$(ssh-keygen -lf "$KEY_PATH" | cut -d' ' -f2)
+          GENERATED_FINGERPRINT=$(ssh-keygen -lf infra/infra/keys/anabolic.pub | cut -d' ' -f2)
+          echo "Local SSH key fingerprint: $LOCAL_FINGERPRINT"
+          echo "Generated public key fingerprint: $GENERATED_FINGERPRINT"
+          
+          if [ "$GENERATED_FINGERPRINT" = "$LOCAL_FINGERPRINT" ]; then
+            echo "✅ Public key correctly matches private key"
           else
-            echo "Failed to generate public key from LIGHTSAIL_SSH_KEY_B64"
-            echo "The base64-encoded private key may be corrupted or invalid"
+            echo "❌ ERROR: Generated public key doesn't match private key!"
             exit 1
           fi
       - name: Setup Terraform
@@ -86,66 +60,38 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws-region: eu-central-1
-      - name: Terraform Apply
+      - name: Clean up and deploy infrastructure
         working-directory: infra/infra/terraform
         run: |
           set -e
-          terraform init -reconfigure -input=false
-          terraform workspace select dev || terraform workspace new dev
           
-          # Force regenerate public key to ensure it's current
-          echo "=== Regenerating Public Key for Terraform ==="
-          KEY_PATH=~/.ssh/anabolic
-          ssh-keygen -y -f "$KEY_PATH" > ../keys/anabolic.pub
-          echo "Public key regenerated:"
-          cat ../keys/anabolic.pub
-          PUBLIC_KEY_FINGERPRINT=$(ssh-keygen -lf ../keys/anabolic.pub | cut -d' ' -f2)
-          echo "Public key fingerprint: $PUBLIC_KEY_FINGERPRINT"
+          # Clean up old resources first
+          echo "🧹 Cleaning up old resources..."
+          aws lightsail delete-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci 2>/dev/null && echo "Deleted old key pair" || echo "Old key pair not found"
+          aws lightsail delete-instance --region eu-central-1 --instance-name anabolic-litellm 2>/dev/null && echo "Deleted old instance" || echo "Old instance not found"
           
-          # FORCE DELETE old key pair AND instance from Lightsail before Terraform
-          echo "=== Force Deleting Old Resources ==="
-          aws lightsail delete-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci 2>/dev/null && echo "Deleted anabolic-key-ci" || echo "anabolic-key-ci not found"
-          
-          # Also delete the instance if it exists with wrong key
-          aws lightsail delete-instance --region eu-central-1 --instance-name anabolic-litellm 2>/dev/null && echo "Deleted orphaned instance" || echo "Instance not found or already deleted"
-          
-          # Wait for deletion to complete
-          echo "Waiting for resources to be fully deleted..."
+          echo "Waiting for cleanup to complete..."
           sleep 10
           
-          # Import new key pair with correct fingerprint  
-          echo "=== Creating New Key Pair in Lightsail ==="
+          # Try to import SSH key to Lightsail (optional)
+          echo "🔐 Importing SSH key to Lightsail..."
           PUBLIC_KEY_CONTENT=$(cat ../keys/anabolic.pub)
-          echo "Importing public key: $PUBLIC_KEY_CONTENT"
+          KEY_IMPORTED=false
           
-          # Try direct import without base64 encoding (Lightsail expects plain text)
-          if echo "$PUBLIC_KEY_CONTENT" | aws lightsail import-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci --public-key-base64 /dev/stdin 2>&1; then
-            echo "✅ Successfully imported key pair to Lightsail (plain text)"
-            KEY_IMPORTED=true
-          # Try with proper base64 encoding format
-          elif aws lightsail import-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci --public-key-base64 "$(echo "$PUBLIC_KEY_CONTENT" | base64 -w 0)" 2>&1; then
-            echo "✅ Successfully imported key pair to Lightsail (base64)"
+          if aws lightsail import-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci --public-key-base64 "$(echo "$PUBLIC_KEY_CONTENT" | base64 -w 0)" 2>&1; then
+            echo "✅ Successfully imported key pair to Lightsail"
             KEY_IMPORTED=true
           else
-            echo "❌ Failed to import key pair, will let Terraform create it instead"
+            echo "❌ Failed to import key pair, will let Terraform create it"
             KEY_IMPORTED=false
           fi
           
-          if [ "$KEY_IMPORTED" = "true" ]; then
-            # Verify the imported key fingerprint
-            LIGHTSAIL_FINGERPRINT=$(aws lightsail get-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci --query "keyPair.fingerprint" --output text 2>/dev/null || echo "")
-            echo "Lightsail key fingerprint: $LIGHTSAIL_FINGERPRINT"
-          fi
+          # Initialize and apply Terraform
+          echo "🏗️ Deploying infrastructure with Terraform..."
+          terraform init -reconfigure -input=false
+          terraform workspace select dev || terraform workspace new dev
           
-          # Show current Lightsail resources before apply
-          echo "=== Current Lightsail Resources ==="
-          aws lightsail get-instances --region eu-central-1 --query "instances[].{Name:name,State:state.name,KeyName:sshKeyName}" --output table || true
-          aws lightsail get-key-pairs --region eu-central-1 --query "keyPairs[].{Name:name,Fingerprint:fingerprint}" --output table || true
-          
-          # Recreate instance - let Terraform create key if import failed
-          echo "=== Applying Terraform Configuration ==="
           if [ "$KEY_IMPORTED" = "true" ]; then
-            echo "Using pre-imported key pair"
             terraform apply -auto-approve -input=false \
               -var ssh_key_name=anabolic-key-ci \
               -var create_key_pair=false \
@@ -153,7 +99,6 @@ jobs:
               -var create_static_ip=false \
               -var existing_static_ip_name=anabolic-litellm-ip
           else
-            echo "Let Terraform create key pair from public key file"
             terraform apply -auto-approve -input=false \
               -var ssh_key_name=anabolic-key-ci \
               -var create_key_pair=true \
@@ -162,46 +107,28 @@ jobs:
               -var existing_static_ip_name=anabolic-litellm-ip
           fi
           
-          # Show resources after apply
-          echo "=== Resources After Terraform Apply ==="
-          aws lightsail get-instances --region eu-central-1 --query "instances[].{Name:name,State:state.name,KeyName:sshKeyName}" --output table || true
-          aws lightsail get-key-pairs --region eu-central-1 --query "keyPairs[].{Name:name,Fingerprint:fingerprint}" --output table || true
+          echo "Resources after Terraform apply:"
+          aws lightsail get-instances --region eu-central-1 --query "instances[].{Name:name,State:state.name,KeyName:sshKeyName}" --output table 2>/dev/null || echo "No instances found"
       - name: Get public IP
         id: ip
         working-directory: infra/infra/terraform
         run: |
-          echo "=== Terraform Output Debug ==="
-          terraform output || echo "No outputs available"
-          
-          # Try to get public IP from various sources
+          echo "🌐 Getting public IP address..."
           IP=""
           
-          # Method 1: Try terraform output (check if it's a valid IP, not a warning)
+          # Try Terraform output first
           if OUTPUT=$(terraform output -raw public_ip 2>/dev/null); then
             if echo "$OUTPUT" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
               IP="$OUTPUT"
               echo "Got IP from terraform output: $IP"
-            else
-              echo "Terraform output contains warnings/errors, not an IP address"
             fi
           fi
           
-          # Method 2: Try terraform show if no IP yet
+          # Fallback to AWS CLI
           if [ -z "$IP" ]; then
-            if OUTPUT=$(terraform show -json 2>/dev/null | jq -r '.values.outputs.public_ip.value' 2>/dev/null); then
-              if echo "$OUTPUT" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
-                IP="$OUTPUT"
-                echo "Got IP from terraform show: $IP"
-              fi
-            fi
-          fi
-          
-          # Method 3: Try AWS CLI if still no IP
-          if [ -z "$IP" ]; then
-            echo "Terraform outputs not available, trying AWS CLI..."
-            INSTANCE_NAME="anabolic-litellm"
+            echo "Terraform output not available, trying AWS CLI..."
             if OUTPUT=$(aws lightsail get-instances --region eu-central-1 \
-              --query "instances[?name=='$INSTANCE_NAME'].publicIpAddress" \
+              --query "instances[?name=='anabolic-litellm'].publicIpAddress" \
               --output text 2>/dev/null); then
               if echo "$OUTPUT" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
                 IP="$OUTPUT"
@@ -210,111 +137,89 @@ jobs:
             fi
           fi
           
-          # Final check
           if [ -z "$IP" ]; then
-            echo "ERROR: Cannot find public IP from any source"
-            echo "Available terraform outputs:"
-            terraform output -json 2>/dev/null || echo "No outputs in JSON format"
-            echo "Lightsail instances:"
-            aws lightsail get-instances --region eu-central-1 --query "instances[].{Name:name,State:state.name,IP:publicIpAddress}" --output table 2>/dev/null || echo "AWS CLI failed"
+            echo "❌ ERROR: Cannot find public IP from any source"
             exit 1
           fi
           
+          echo "✅ Instance Public IP: $IP"
           echo "ip=$IP" >> $GITHUB_OUTPUT
-          echo "Final IP set to: $IP"
-      - name: Sync stack files
+      - name: Deploy application stack
         run: |
           IP=${{ steps.ip.outputs.ip }}
-          echo "Deploy to $IP"
           KEY_PATH=~/.ssh/anabolic
           
-          # Debug SSH key and Lightsail setup
-          echo "=== SSH Key Debugging ==="
-          echo "Key file exists: $([ -f "$KEY_PATH" ] && echo "YES" || echo "NO")"
-          echo "Key permissions: $(ls -la "$KEY_PATH")"
-          LOCAL_FINGERPRINT=$(ssh-keygen -lf "$KEY_PATH" | cut -d' ' -f2)
-          echo "Local private key fingerprint: $LOCAL_FINGERPRINT"
-          
-          # Check Lightsail key pairs
-          echo "=== Lightsail Key Pairs ==="
-          aws lightsail get-key-pairs --region eu-central-1 --query "keyPairs[].{Name:name,Fingerprint:fingerprint}" --output table || echo "Failed to get key pairs"
-          
-          # Get the fingerprint of the key assigned to our instance
-          INSTANCE_KEY_NAME=$(aws lightsail get-instance --region eu-central-1 --instance-name anabolic-litellm --query "instance.sshKeyName" --output text || echo "")
-          echo "=== Instance Key Assignment ==="
-          echo "Instance SSH key name: $INSTANCE_KEY_NAME"
-          
-          if [ -n "$INSTANCE_KEY_NAME" ] && [ "$INSTANCE_KEY_NAME" != "None" ]; then
-            LIGHTSAIL_FINGERPRINT=$(aws lightsail get-key-pair --region eu-central-1 --key-pair-name "$INSTANCE_KEY_NAME" --query "keyPair.fingerprint" --output text 2>/dev/null || echo "")
-            echo "Lightsail key fingerprint: $LIGHTSAIL_FINGERPRINT"
-            
-            # Convert SSH fingerprint format to match Lightsail format for comparison
-            LOCAL_FINGERPRINT_B64=$(ssh-keygen -lf "$KEY_PATH" -E md5 | cut -d' ' -f2 | cut -d':' -f2- | xxd -r -p | base64)
-            
-            if [ "$LIGHTSAIL_FINGERPRINT" != "$LOCAL_FINGERPRINT_B64" ]; then
-              echo "❌ FINGERPRINT MISMATCH DETECTED!"
-              echo "This explains why SSH authentication is failing."
-              echo "The Lightsail key pair needs to be updated with the current public key."
-              echo "Will skip SSH connection attempts - instance needs to be recreated with correct key."
-              SSH_SKIP=true
-            else
-              echo "✅ Fingerprints match!"
-              SSH_SKIP=false
-            fi
-          else
-            echo "❌ No SSH key assigned to instance"
-          fi
-          
-          # Wait for SSH to become ready with verbose output
-          echo "=== SSH Connection Testing ==="
-          if [ "$SSH_SKIP" = "true" ]; then
-            echo "Skipping SSH connection test due to fingerprint mismatch."
-            echo "The instance was created with the wrong SSH key."
-            echo "Please run the deployment again - Terraform will recreate the instance with the correct key."
-            exit 1
-          fi
-          
-          for i in {1..10}; do
-            echo "Attempt $i/10: Testing SSH connection..."
-            if ssh -v -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ubuntu@${IP} "echo ok" 2>&1; then
-              echo "SSH connection established successfully!"
+          echo "🔌 Testing SSH connection to $IP..."
+          # Wait for SSH to become ready
+          SSH_WORKING=false
+          for i in {1..20}; do
+            echo "Attempt $i/20: Testing SSH connection..."
+            if ssh -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 ubuntu@"$IP" "echo 'SSH connection successful'" 2>/dev/null; then
+              echo "✅ SSH connection established successfully!"
+              SSH_WORKING=true
               break
             fi
-            echo "SSH attempt $i failed, waiting 10 seconds..."
-            sleep 10
+            echo "SSH attempt $i failed, waiting 15 seconds..."
+            sleep 15
           done
-          
-          # Final connection test before rsync
-          echo "Final SSH test before rsync..."
-          if ! ssh -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 ubuntu@${IP} "echo 'SSH works'" 2>&1; then
-            echo "ERROR: SSH connection failed, cannot proceed with rsync"
-            echo "Trying different SSH options..."
-            ssh -v -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${IP} "echo 'test'" 2>&1 || true
+
+          if [ "$SSH_WORKING" != "true" ]; then
+            echo "❌ SSH connection failed after 20 attempts"
             exit 1
           fi
           
-          # Sync files to server
-          echo "Starting file sync..."
+          echo "📦 Creating stack directory and setting permissions..."
+          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@"$IP" "sudo mkdir -p /opt/stack && sudo chown ubuntu:ubuntu /opt/stack"
+          
+          echo "📤 Syncing stack files to $IP..."
           export RSYNC_RSH="ssh -i $KEY_PATH -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-          rsync -avz infra/infra/stack/ ubuntu@${IP}:/opt/stack/
-      - name: Fetch secrets from SSM and start stack
+          rsync -avz infra/infra/stack/ ubuntu@"$IP":/opt/stack/
+      - name: Start services with secrets from SSM
         run: |
           IP=${{ steps.ip.outputs.ip }}
+          KEY_PATH=~/.ssh/anabolic
+          
+          echo "🔐 Fetching secrets from SSM..."
           ANTHROPIC=$(aws ssm get-parameter --region eu-central-1 --name "/anabolic/litellm/ANTHROPIC_API_KEY" --with-decryption --query "Parameter.Value" --output text)
           PROXY=$(aws ssm get-parameter --region eu-central-1 --name "/anabolic/litellm/LITELLM_PROXY_API_KEY" --with-decryption --query "Parameter.Value" --output text)
-          ssh -i ~/.ssh/anabolic -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${IP} "bash -s" <<'SSH'
+          
+          echo "🚀 Starting services on $IP..."
+          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@"$IP" "bash -s" <<EOF
           set -e
           cd /opt/stack
-          # write .env
-          cat > .env <<ENV
-          ANTHROPIC_API_KEY=__ANTHROPIC__
-          LITELLM_PROXY_API_KEY=__PROXY__
-          ENV
-          sed -i 's/__ANTHROPIC__/'"$(printf %s "$ANTHROPIC" | sed 's/[\&/]/\\&/g')"'/' .env
-          sed -i 's/__PROXY__/'"$(printf %s "$PROXY" | sed 's/[\&/]/\\&/g')"'/' .env
+
+          # Install Docker if not present
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "Installing Docker..."
+            curl -fsSL https://get.docker.com | sudo sh
+            sudo usermod -aG docker ubuntu
+            sudo systemctl enable docker
+            sudo systemctl start docker
+            sleep 5
+            sudo apt-get update
+            sudo apt-get install -y docker-compose-plugin
+          fi
+
+          # Create .env file
+          cat > .env <<ENVFILE
+          ANTHROPIC_API_KEY=$ANTHROPIC
+          LITELLM_PROXY_API_KEY=$PROXY
+          ENVFILE
+
           chmod 600 .env
-          export $(cat .env | xargs)
-          docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions || true
-          docker compose pull || true
-          docker compose up -d
-          SSH
+          export \$(cat .env | xargs)
+
+          # Install Docker plugins and start services
+          sudo docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions || true
+          sudo docker compose pull || true
+          sudo docker compose up -d
+
+          echo "Services started successfully!"
+          sudo docker compose ps
+          EOF
+          
+          echo ""
+          echo "🎉 Deployment completed successfully!"
+          echo "📊 Access your services:"
+          echo "  LiteLLM Proxy: http://$IP (port 80)"
+          echo "  Grafana: http://$IP/grafana (admin/admin)"
