@@ -203,27 +203,12 @@ jobs:
             if [ "$LIGHTSAIL_FINGERPRINT" != "$LOCAL_FINGERPRINT_B64" ]; then
               echo "❌ FINGERPRINT MISMATCH DETECTED!"
               echo "This explains why SSH authentication is failing."
-              echo "The instance is using a different key than the one in GitHub Secrets."
-              echo "You need to either:"
-              echo "1. Update LIGHTSAIL_SSH_KEY_B64 with the matching private key, or"
-              echo "2. Recreate the Lightsail key pair with the current public key"
-              
-              # Try to update the key pair
-              echo "Attempting to update Lightsail key pair with current public key..."
-              if aws lightsail delete-key-pair --region eu-central-1 --key-pair-name "$INSTANCE_KEY_NAME" 2>/dev/null; then
-                echo "Deleted old key pair"
-                # Import new key
-                PUBLIC_KEY_CONTENT=$(ssh-keygen -y -f "$KEY_PATH")
-                if aws lightsail import-key-pair --region eu-central-1 --key-pair-name "$INSTANCE_KEY_NAME" --public-key-base64 "$(echo "$PUBLIC_KEY_CONTENT" | base64 -w 0)" 2>/dev/null; then
-                  echo "✅ Successfully imported new key pair"
-                else
-                  echo "❌ Failed to import new key pair"
-                fi
-              else
-                echo "❌ Failed to delete old key pair"
-              fi
+              echo "The Lightsail key pair needs to be updated with the current public key."
+              echo "Will skip SSH connection attempts - instance needs to be recreated with correct key."
+              SSH_SKIP=true
             else
               echo "✅ Fingerprints match!"
+              SSH_SKIP=false
             fi
           else
             echo "❌ No SSH key assigned to instance"
@@ -231,6 +216,13 @@ jobs:
           
           # Wait for SSH to become ready with verbose output
           echo "=== SSH Connection Testing ==="
+          if [ "$SSH_SKIP" = "true" ]; then
+            echo "Skipping SSH connection test due to fingerprint mismatch."
+            echo "The instance was created with the wrong SSH key."
+            echo "Please run the deployment again - Terraform will recreate the instance with the correct key."
+            exit 1
+          fi
+          
           for i in {1..10}; do
             echo "Attempt $i/10: Testing SSH connection..."
             if ssh -v -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ubuntu@${IP} "echo ok" 2>&1; then
