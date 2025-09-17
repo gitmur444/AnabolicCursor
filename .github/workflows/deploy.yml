@@ -181,15 +181,53 @@ jobs:
           echo "=== SSH Key Debugging ==="
           echo "Key file exists: $([ -f "$KEY_PATH" ] && echo "YES" || echo "NO")"
           echo "Key permissions: $(ls -la "$KEY_PATH")"
-          echo "Public key fingerprint: $(ssh-keygen -lf "$KEY_PATH" | cut -d' ' -f2)"
+          LOCAL_FINGERPRINT=$(ssh-keygen -lf "$KEY_PATH" | cut -d' ' -f2)
+          echo "Local private key fingerprint: $LOCAL_FINGERPRINT"
           
           # Check Lightsail key pairs
           echo "=== Lightsail Key Pairs ==="
           aws lightsail get-key-pairs --region eu-central-1 --query "keyPairs[].{Name:name,Fingerprint:fingerprint}" --output table || echo "Failed to get key pairs"
           
-          # Check instance key pair assignment
+          # Get the fingerprint of the key assigned to our instance
+          INSTANCE_KEY_NAME=$(aws lightsail get-instance --region eu-central-1 --instance-name anabolic-litellm --query "instance.sshKeyName" --output text || echo "")
           echo "=== Instance Key Assignment ==="
-          aws lightsail get-instance --region eu-central-1 --instance-name anabolic-litellm --query "instance.sshKeyName" --output text || echo "Failed to get instance SSH key"
+          echo "Instance SSH key name: $INSTANCE_KEY_NAME"
+          
+          if [ -n "$INSTANCE_KEY_NAME" ] && [ "$INSTANCE_KEY_NAME" != "None" ]; then
+            LIGHTSAIL_FINGERPRINT=$(aws lightsail get-key-pair --region eu-central-1 --key-pair-name "$INSTANCE_KEY_NAME" --query "keyPair.fingerprint" --output text 2>/dev/null || echo "")
+            echo "Lightsail key fingerprint: $LIGHTSAIL_FINGERPRINT"
+            
+            # Convert SSH fingerprint format to match Lightsail format for comparison
+            LOCAL_FINGERPRINT_B64=$(ssh-keygen -lf "$KEY_PATH" -E md5 | cut -d' ' -f2 | cut -d':' -f2- | xxd -r -p | base64)
+            
+            if [ "$LIGHTSAIL_FINGERPRINT" != "$LOCAL_FINGERPRINT_B64" ]; then
+              echo "❌ FINGERPRINT MISMATCH DETECTED!"
+              echo "This explains why SSH authentication is failing."
+              echo "The instance is using a different key than the one in GitHub Secrets."
+              echo "You need to either:"
+              echo "1. Update LIGHTSAIL_SSH_KEY_B64 with the matching private key, or"
+              echo "2. Recreate the Lightsail key pair with the current public key"
+              
+              # Try to update the key pair
+              echo "Attempting to update Lightsail key pair with current public key..."
+              if aws lightsail delete-key-pair --region eu-central-1 --key-pair-name "$INSTANCE_KEY_NAME" 2>/dev/null; then
+                echo "Deleted old key pair"
+                # Import new key
+                PUBLIC_KEY_CONTENT=$(ssh-keygen -y -f "$KEY_PATH")
+                if aws lightsail import-key-pair --region eu-central-1 --key-pair-name "$INSTANCE_KEY_NAME" --public-key-base64 "$(echo "$PUBLIC_KEY_CONTENT" | base64 -w 0)" 2>/dev/null; then
+                  echo "✅ Successfully imported new key pair"
+                else
+                  echo "❌ Failed to import new key pair"
+                fi
+              else
+                echo "❌ Failed to delete old key pair"
+              fi
+            else
+              echo "✅ Fingerprints match!"
+            fi
+          else
+            echo "❌ No SSH key assigned to instance"
+          fi
           
           # Wait for SSH to become ready with verbose output
           echo "=== SSH Connection Testing ==="
