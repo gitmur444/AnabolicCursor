@@ -118,13 +118,23 @@ jobs:
           PUBLIC_KEY_CONTENT=$(cat ../keys/anabolic.pub)
           echo "Importing public key: $PUBLIC_KEY_CONTENT"
           
-          if aws lightsail import-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci --public-key-base64 "$(echo "$PUBLIC_KEY_CONTENT" | base64 -w 0)" 2>&1; then
-            echo "✅ Successfully imported key pair to Lightsail"
-            # Verify the imported key fingerprint
-            LIGHTSAIL_FINGERPRINT=$(aws lightsail get-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci --query "keyPair.fingerprint" --output text)
-            echo "Lightsail key fingerprint: $LIGHTSAIL_FINGERPRINT"
+          # Try direct import without base64 encoding (Lightsail expects plain text)
+          if echo "$PUBLIC_KEY_CONTENT" | aws lightsail import-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci --public-key-base64 /dev/stdin 2>&1; then
+            echo "✅ Successfully imported key pair to Lightsail (plain text)"
+            KEY_IMPORTED=true
+          # Try with proper base64 encoding format
+          elif aws lightsail import-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci --public-key-base64 "$(echo "$PUBLIC_KEY_CONTENT" | base64 -w 0)" 2>&1; then
+            echo "✅ Successfully imported key pair to Lightsail (base64)"
+            KEY_IMPORTED=true
           else
-            echo "❌ Failed to import key pair, Terraform will create it instead"
+            echo "❌ Failed to import key pair, will let Terraform create it instead"
+            KEY_IMPORTED=false
+          fi
+          
+          if [ "$KEY_IMPORTED" = "true" ]; then
+            # Verify the imported key fingerprint
+            LIGHTSAIL_FINGERPRINT=$(aws lightsail get-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci --query "keyPair.fingerprint" --output text 2>/dev/null || echo "")
+            echo "Lightsail key fingerprint: $LIGHTSAIL_FINGERPRINT"
           fi
           
           # Show current Lightsail resources before apply
@@ -132,14 +142,25 @@ jobs:
           aws lightsail get-instances --region eu-central-1 --query "instances[].{Name:name,State:state.name,KeyName:sshKeyName}" --output table || true
           aws lightsail get-key-pairs --region eu-central-1 --query "keyPairs[].{Name:name,Fingerprint:fingerprint}" --output table || true
           
-          # Recreate instance with pre-created key pair
+          # Recreate instance - let Terraform create key if import failed
           echo "=== Applying Terraform Configuration ==="
-          terraform apply -auto-approve -input=false \
-            -var ssh_key_name=anabolic-key-ci \
-            -var create_key_pair=false \
-            -var create_instance=true \
-            -var create_static_ip=false \
-            -var existing_static_ip_name=anabolic-litellm-ip
+          if [ "$KEY_IMPORTED" = "true" ]; then
+            echo "Using pre-imported key pair"
+            terraform apply -auto-approve -input=false \
+              -var ssh_key_name=anabolic-key-ci \
+              -var create_key_pair=false \
+              -var create_instance=true \
+              -var create_static_ip=false \
+              -var existing_static_ip_name=anabolic-litellm-ip
+          else
+            echo "Let Terraform create key pair from public key file"
+            terraform apply -auto-approve -input=false \
+              -var ssh_key_name=anabolic-key-ci \
+              -var create_key_pair=true \
+              -var create_instance=true \
+              -var create_static_ip=false \
+              -var existing_static_ip_name=anabolic-litellm-ip
+          fi
           
           # Show resources after apply
           echo "=== Resources After Terraform Apply ==="
