@@ -24,18 +24,31 @@ jobs:
           KEY_PATH=~/.ssh/anabolic
           write_key() {
             local content="$1"
-            # Try base64 decode
-            if printf '%s' "$content" | base64 -d > "$KEY_PATH" 2>/dev/null; then
-              :
-            # Try interpreting escaped newlines (\n)
-            elif printf '%b' "$content" > "$KEY_PATH" 2>/dev/null; then
-              :
+            # Remove potential quotes from the content
+            content=$(echo "$content" | sed 's/^"//;s/"$//')
+            
+            # Try base64 decode first
+            if echo "$content" | base64 -d > "$KEY_PATH" 2>/dev/null && [ -s "$KEY_PATH" ]; then
+              echo "Successfully decoded base64 key"
+            # Try interpreting escaped newlines (\n -> actual newlines)
+            elif printf '%b' "$content" > "$KEY_PATH" 2>/dev/null && [ -s "$KEY_PATH" ]; then
+              echo "Successfully wrote key with escaped newlines"
+            # Write content directly
             else
-              printf '%s' "$content" > "$KEY_PATH"
+              printf '%s\n' "$content" > "$KEY_PATH"
+              echo "Wrote key content directly"
             fi
-            # Normalize line endings
-            sed -i 's/\r$//' "$KEY_PATH" || true
+            
+            # Normalize line endings and ensure proper format
+            sed -i 's/\r$//' "$KEY_PATH" 2>/dev/null || true
+            
+            # Ensure key starts with proper header
+            if ! grep -q "BEGIN.*PRIVATE KEY" "$KEY_PATH"; then
+              echo "Warning: Key may not have proper format"
+              head -1 "$KEY_PATH"
+            fi
           }
+          
           if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
             write_key "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}"
           elif [ -n "${{ secrets.LIGHTSAIL_SSH_KEY }}" ]; then
@@ -43,9 +56,24 @@ jobs:
           else
             echo "No LIGHTSAIL_SSH_KEY(_B64) provided" >&2; exit 1
           fi
+          
           chmod 600 "$KEY_PATH"
-          # Validate key is parsable
-          ssh-keygen -y -f "$KEY_PATH" > /dev/null
+          
+          # Validate key is parsable and show debug info if not
+          if ! ssh-keygen -y -f "$KEY_PATH" > /dev/null 2>&1; then
+            echo "Key validation failed. Debug info:"
+            echo "Key file size: $(wc -c < "$KEY_PATH")"
+            echo "First few lines:"
+            head -3 "$KEY_PATH" || true
+            echo "Last few lines:"  
+            tail -3 "$KEY_PATH" || true
+            echo "Checking for common issues..."
+            if grep -q $'\r' "$KEY_PATH"; then
+              echo "Found Windows line endings"
+            fi
+            exit 1
+          fi
+          
           mkdir -p infra/infra/keys
           ssh-keygen -y -f "$KEY_PATH" > infra/infra/keys/anabolic.pub
       - name: Setup Terraform
