@@ -64,6 +64,19 @@ jobs:
           mkdir -p infra/infra/keys
           if ssh-keygen -y -f "$KEY_PATH" > infra/infra/keys/anabolic.pub 2>&1; then
             echo "Generated public key for Terraform successfully"
+            
+            # Verify the generated public key matches our private key
+            GENERATED_FINGERPRINT=$(ssh-keygen -lf infra/infra/keys/anabolic.pub | cut -d' ' -f2)
+            PRIVATE_FINGERPRINT=$(ssh-keygen -lf "$KEY_PATH" | cut -d' ' -f2)
+            echo "Private key fingerprint: $PRIVATE_FINGERPRINT"
+            echo "Generated public key fingerprint: $GENERATED_FINGERPRINT"
+            
+            if [ "$GENERATED_FINGERPRINT" = "$PRIVATE_FINGERPRINT" ]; then
+              echo "✅ Public key correctly matches private key"
+            else
+              echo "❌ ERROR: Generated public key doesn't match private key!"
+              exit 1
+            fi
           else
             echo "Failed to generate public key. Trying to fix common issues..."
             
@@ -96,6 +109,14 @@ jobs:
           set -e
           terraform init -reconfigure -input=false
           terraform workspace select dev || terraform workspace new dev
+          
+          # Force regenerate public key to ensure it's current
+          echo "=== Regenerating Public Key for Terraform ==="
+          KEY_PATH=~/.ssh/anabolic
+          ssh-keygen -y -f "$KEY_PATH" > ../keys/anabolic.pub
+          echo "Public key regenerated:"
+          cat ../keys/anabolic.pub
+          echo "Public key fingerprint: $(ssh-keygen -lf ../keys/anabolic.pub | cut -d' ' -f2)"
           
           # Show current Lightsail resources before apply
           echo "=== Current Lightsail Resources ==="
