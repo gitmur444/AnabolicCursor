@@ -21,7 +21,11 @@ jobs:
         run: |
           set -e
           mkdir -p ~/.ssh
-          echo "${{ secrets.LIGHTSAIL_SSH_KEY }}" > ~/.ssh/anabolic
+          if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
+            echo "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/anabolic
+          else
+            echo "${{ secrets.LIGHTSAIL_SSH_KEY }}" | tr -d '\r' > ~/.ssh/anabolic
+          fi
           chmod 600 ~/.ssh/anabolic
           mkdir -p infra/infra/keys
           ssh-keygen -y -f ~/.ssh/anabolic > infra/infra/keys/anabolic.pub
@@ -49,16 +53,21 @@ jobs:
           IP=${{ steps.ip.outputs.ip }}
           echo "Deploy to $IP"
           mkdir -p ~/.ssh
-          echo "${{ secrets.LIGHTSAIL_SSH_KEY }}" > ~/.ssh/anabolic
+          if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
+            echo "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/anabolic
+          else
+            echo "${{ secrets.LIGHTSAIL_SSH_KEY }}" | tr -d '\r' > ~/.ssh/anabolic
+          fi
           chmod 600 ~/.ssh/anabolic
-          RSYNC_RSH="ssh -i ~/.ssh/anabolic -o StrictHostKeyChecking=no"
+          ssh-keyscan -H $IP >> ~/.ssh/known_hosts 2>/dev/null || true
+          export RSYNC_RSH="ssh -i ~/.ssh/anabolic -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
           rsync -avz infra/infra/stack/ ubuntu@${IP}:/opt/stack/
       - name: Fetch secrets from SSM and start stack
         run: |
           IP=${{ steps.ip.outputs.ip }}
           ANTHROPIC=$(aws ssm get-parameter --region eu-central-1 --name "/anabolic/litellm/ANTHROPIC_API_KEY" --with-decryption --query "Parameter.Value" --output text)
           PROXY=$(aws ssm get-parameter --region eu-central-1 --name "/anabolic/litellm/LITELLM_PROXY_API_KEY" --with-decryption --query "Parameter.Value" --output text)
-          ssh -i ~/.ssh/anabolic -o StrictHostKeyChecking=no ubuntu@${IP} "bash -s" <<'SSH'
+          ssh -i ~/.ssh/anabolic -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${IP} "bash -s" <<'SSH'
           set -e
           cd /opt/stack
           # write .env
