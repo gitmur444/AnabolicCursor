@@ -102,9 +102,16 @@ jobs:
           PUBLIC_KEY_FINGERPRINT=$(ssh-keygen -lf ../keys/anabolic.pub | cut -d' ' -f2)
           echo "Public key fingerprint: $PUBLIC_KEY_FINGERPRINT"
           
-          # FORCE DELETE old key pair from Lightsail before Terraform
-          echo "=== Force Deleting Old Key Pair ==="
+          # FORCE DELETE old key pair AND instance from Lightsail before Terraform
+          echo "=== Force Deleting Old Resources ==="
           aws lightsail delete-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci 2>/dev/null && echo "Deleted anabolic-key-ci" || echo "anabolic-key-ci not found"
+          
+          # Also delete the instance if it exists with wrong key
+          aws lightsail delete-instance --region eu-central-1 --instance-name anabolic-litellm 2>/dev/null && echo "Deleted orphaned instance" || echo "Instance not found or already deleted"
+          
+          # Wait for deletion to complete
+          echo "Waiting for resources to be fully deleted..."
+          sleep 10
           
           # Import new key pair with correct fingerprint  
           echo "=== Creating New Key Pair in Lightsail ==="
