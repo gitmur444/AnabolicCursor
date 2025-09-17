@@ -54,10 +54,39 @@ jobs:
           
           chmod 600 "$KEY_PATH"
           
-          # Generate public key from private key
+          # Debug the key before trying to use it
+          echo "=== DEBUGGING SSH KEY ==="
+          echo "Key file exists: $([ -f "$KEY_PATH" ] && echo "YES" || echo "NO")"
+          echo "Key permissions: $(ls -la "$KEY_PATH" 2>/dev/null || echo "N/A")"
+          echo "First 3 lines:"
+          head -3 "$KEY_PATH" | cat -A
+          echo "Last 3 lines:"
+          tail -3 "$KEY_PATH" | cat -A
+          echo "Line count: $(wc -l < "$KEY_PATH")"
+          echo "Character count: $(wc -c < "$KEY_PATH")"
+          echo "==========================="
+          
+          # Try to generate public key from private key
           mkdir -p infra/infra/keys
-          ssh-keygen -y -f "$KEY_PATH" > infra/infra/keys/anabolic.pub
-          echo "Generated public key for Terraform"
+          if ssh-keygen -y -f "$KEY_PATH" > infra/infra/keys/anabolic.pub 2>&1; then
+            echo "Generated public key for Terraform successfully"
+          else
+            echo "Failed to generate public key. Trying to fix common issues..."
+            
+            # Try different approaches to fix the key
+            echo "Attempting to rewrite key with printf..."
+            printf '%s\n' "${{ secrets.LIGHTSAIL_SSH_KEY }}" > "$KEY_PATH.tmp"
+            chmod 600 "$KEY_PATH.tmp"
+            
+            if ssh-keygen -y -f "$KEY_PATH.tmp" > infra/infra/keys/anabolic.pub 2>&1; then
+              echo "Success with printf method!"
+              mv "$KEY_PATH.tmp" "$KEY_PATH"
+            else
+              echo "Still failed. The SSH key in GitHub Secrets may be corrupted."
+              echo "Please check that the key is properly formatted with proper line breaks."
+              exit 1
+            fi
+          fi
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
