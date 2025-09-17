@@ -107,7 +107,36 @@ jobs:
         id: ip
         working-directory: infra/infra/terraform
         run: |
-          echo "ip=$(terraform output -raw public_ip)" >> $GITHUB_OUTPUT
+          echo "=== Terraform Output Debug ==="
+          terraform output || echo "No outputs available"
+          
+          # Try to get public IP from various sources
+          if IP=$(terraform output -raw public_ip 2>/dev/null) && [ -n "$IP" ]; then
+            echo "Got IP from terraform output: $IP"
+          elif IP=$(terraform show -json | jq -r '.values.outputs.public_ip.value' 2>/dev/null) && [ -n "$IP" ] && [ "$IP" != "null" ]; then
+            echo "Got IP from terraform show: $IP"
+          else
+            echo "Terraform outputs not available, trying AWS CLI..."
+            # Try to get instance IP using AWS CLI
+            INSTANCE_NAME="anabolic-litellm"
+            IP=$(aws lightsail get-instances --region eu-central-1 \
+              --query "instances[?name=='$INSTANCE_NAME'].publicIpAddress" \
+              --output text 2>/dev/null || echo "")
+            
+            if [ -n "$IP" ] && [ "$IP" != "None" ]; then
+              echo "Got IP from AWS Lightsail CLI: $IP"
+            else
+              echo "ERROR: Cannot find public IP from any source"
+              echo "Available terraform outputs:"
+              terraform output -json || echo "No outputs in JSON format"
+              echo "Lightsail instances:"
+              aws lightsail get-instances --region eu-central-1 --query "instances[].{Name:name,State:state.name,IP:publicIpAddress}" --output table || echo "AWS CLI failed"
+              exit 1
+            fi
+          fi
+          
+          echo "ip=$IP" >> $GITHUB_OUTPUT
+          echo "Final IP set to: $IP"
       - name: Sync stack files
         run: |
           IP=${{ steps.ip.outputs.ip }}
