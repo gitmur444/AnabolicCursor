@@ -41,8 +41,16 @@ jobs:
       - name: Terraform Apply
         working-directory: infra/infra/terraform
         run: |
-          terraform init
-          terraform apply -auto-approve
+          set -e
+          terraform init -reconfigure -input=false
+          terraform workspace select dev || terraform workspace new dev
+          # Recreate instance with a CI-managed key that matches the secret-derived public key
+          terraform apply -auto-approve -input=false \
+            -var ssh_key_name=anabolic-key-ci \
+            -var create_key_pair=true \
+            -var create_instance=true \
+            -var create_static_ip=false \
+            -var existing_static_ip_name=anabolic-litellm-ip
       - name: Get public IP
         id: ip
         working-directory: infra/infra/terraform
@@ -60,6 +68,13 @@ jobs:
           fi
           chmod 600 ~/.ssh/anabolic
           ssh-keyscan -H $IP >> ~/.ssh/known_hosts 2>/dev/null || true
+          # Wait for SSH to become ready after instance replacement
+          for i in {1..30}; do
+            if ssh -i ~/.ssh/anabolic -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ubuntu@${IP} "echo ok" >/dev/null 2>&1; then
+              break
+            fi
+            echo "Waiting for SSH... ($i)"; sleep 5;
+          done
           export RSYNC_RSH="ssh -i ~/.ssh/anabolic -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
           rsync -avz infra/infra/stack/ ubuntu@${IP}:/opt/stack/
       - name: Fetch secrets from SSM and start stack
