@@ -22,18 +22,30 @@ jobs:
           set -e
           mkdir -p ~/.ssh
           KEY_PATH=~/.ssh/anabolic
-          if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
-            if echo "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | base64 -d > "$KEY_PATH" 2>/dev/null; then
-              echo "Decoded base64 private key"
+          write_key() {
+            local content="$1"
+            # Try base64 decode
+            if printf '%s' "$content" | base64 -d > "$KEY_PATH" 2>/dev/null; then
+              :
+            # Try interpreting escaped newlines (\n)
+            elif printf '%b' "$content" > "$KEY_PATH" 2>/dev/null; then
+              :
             else
-              printf "%s" "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | tr -d '\r' > "$KEY_PATH"
+              printf '%s' "$content" > "$KEY_PATH"
             fi
+            # Normalize line endings
+            sed -i 's/\r$//' "$KEY_PATH" || true
+          }
+          if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
+            write_key "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}"
           elif [ -n "${{ secrets.LIGHTSAIL_SSH_KEY }}" ]; then
-            printf "%s" "${{ secrets.LIGHTSAIL_SSH_KEY }}" | tr -d '\r' > "$KEY_PATH"
+            write_key "${{ secrets.LIGHTSAIL_SSH_KEY }}"
           else
             echo "No LIGHTSAIL_SSH_KEY(_B64) provided" >&2; exit 1
           fi
           chmod 600 "$KEY_PATH"
+          # Validate key is parsable
+          ssh-keygen -y -f "$KEY_PATH" > /dev/null
           mkdir -p infra/infra/keys
           ssh-keygen -y -f "$KEY_PATH" > infra/infra/keys/anabolic.pub
       - name: Setup Terraform
@@ -69,14 +81,21 @@ jobs:
           echo "Deploy to $IP"
           mkdir -p ~/.ssh
           KEY_PATH=~/.ssh/anabolic
-          if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
-            if echo "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | base64 -d > "$KEY_PATH" 2>/dev/null; then
-              echo "Decoded base64 private key"
+          write_key() {
+            local content="$1"
+            if printf '%s' "$content" | base64 -d > "$KEY_PATH" 2>/dev/null; then
+              :
+            elif printf '%b' "$content" > "$KEY_PATH" 2>/dev/null; then
+              :
             else
-              printf "%s" "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | tr -d '\r' > "$KEY_PATH"
+              printf '%s' "$content" > "$KEY_PATH"
             fi
+            sed -i 's/\r$//' "$KEY_PATH" || true
+          }
+          if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
+            write_key "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}"
           elif [ -n "${{ secrets.LIGHTSAIL_SSH_KEY }}" ]; then
-            printf "%s" "${{ secrets.LIGHTSAIL_SSH_KEY }}" | tr -d '\r' > "$KEY_PATH"
+            write_key "${{ secrets.LIGHTSAIL_SSH_KEY }}"
           else
             echo "No LIGHTSAIL_SSH_KEY(_B64) provided" >&2; exit 1
           fi
