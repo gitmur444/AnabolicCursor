@@ -23,32 +23,26 @@ jobs:
           mkdir -p ~/.ssh
           KEY_PATH=~/.ssh/anabolic
           
-          # Write the SSH private key from secrets with proper formatting
-          if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY }}" ]; then
-            # Handle potential line break issues from GitHub Secrets
+          # Write the SSH private key from secrets
+          if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
+            # Decode base64 SSH key
+            echo "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | base64 -d > "$KEY_PATH"
+            echo "SSH private key decoded from LIGHTSAIL_SSH_KEY_B64"
+          elif [ -n "${{ secrets.LIGHTSAIL_SSH_KEY }}" ]; then
+            # Handle plain text SSH key with potential formatting issues
             echo "${{ secrets.LIGHTSAIL_SSH_KEY }}" | sed 's/\\n/\n/g' > "$KEY_PATH"
-            
-            # Ensure proper line endings
             sed -i 's/\r$//' "$KEY_PATH" 2>/dev/null || true
-            
             echo "SSH private key written from LIGHTSAIL_SSH_KEY"
-            echo "Key file size: $(wc -c < "$KEY_PATH") bytes"
-            
-            # Validate the key format
-            if ! grep -q "BEGIN.*PRIVATE KEY" "$KEY_PATH"; then
-              echo "ERROR: Key doesn't appear to have proper BEGIN header"
-              echo "First line: $(head -1 "$KEY_PATH")"
-              exit 1
-            fi
-            
-            if ! grep -q "END.*PRIVATE KEY" "$KEY_PATH"; then
-              echo "ERROR: Key doesn't appear to have proper END footer"  
-              echo "Last line: $(tail -1 "$KEY_PATH")"
-              exit 1
-            fi
-            
           else
-            echo "ERROR: LIGHTSAIL_SSH_KEY secret not found" >&2
+            echo "ERROR: Neither LIGHTSAIL_SSH_KEY_B64 nor LIGHTSAIL_SSH_KEY found" >&2
+            exit 1
+          fi
+          
+          # Validate key format
+          echo "Key file size: $(wc -c < "$KEY_PATH") bytes"
+          if ! grep -q "BEGIN.*PRIVATE KEY" "$KEY_PATH"; then
+            echo "ERROR: Key missing BEGIN header"
+            head -1 "$KEY_PATH"
             exit 1
           fi
           
