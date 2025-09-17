@@ -22,60 +22,21 @@ jobs:
           set -e
           mkdir -p ~/.ssh
           KEY_PATH=~/.ssh/anabolic
-          write_key() {
-            local content="$1"
-            # Remove potential quotes from the content
-            content=$(echo "$content" | sed 's/^"//;s/"$//')
-            
-            # Try base64 decode first
-            if echo "$content" | base64 -d > "$KEY_PATH" 2>/dev/null && [ -s "$KEY_PATH" ]; then
-              echo "Successfully decoded base64 key"
-            # Try interpreting escaped newlines (\n -> actual newlines)
-            elif printf '%b' "$content" > "$KEY_PATH" 2>/dev/null && [ -s "$KEY_PATH" ]; then
-              echo "Successfully wrote key with escaped newlines"
-            # Write content directly
-            else
-              printf '%s\n' "$content" > "$KEY_PATH"
-              echo "Wrote key content directly"
-            fi
-            
-            # Normalize line endings and ensure proper format
-            sed -i 's/\r$//' "$KEY_PATH" 2>/dev/null || true
-            
-            # Ensure key starts with proper header
-            if ! grep -q "BEGIN.*PRIVATE KEY" "$KEY_PATH"; then
-              echo "Warning: Key may not have proper format"
-              head -1 "$KEY_PATH"
-            fi
-          }
           
-          if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
-            write_key "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}"
-          elif [ -n "${{ secrets.LIGHTSAIL_SSH_KEY }}" ]; then
-            write_key "${{ secrets.LIGHTSAIL_SSH_KEY }}"
+          # Write the SSH private key from secrets
+          if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY }}" ]; then
+            printf '%s\n' "${{ secrets.LIGHTSAIL_SSH_KEY }}" > "$KEY_PATH"
+            echo "SSH private key written from LIGHTSAIL_SSH_KEY"
           else
-            echo "No LIGHTSAIL_SSH_KEY(_B64) provided" >&2; exit 1
+            echo "ERROR: LIGHTSAIL_SSH_KEY secret not found" >&2
+            exit 1
           fi
           
           chmod 600 "$KEY_PATH"
           
-          # Validate key is parsable and show debug info if not
-          if ! ssh-keygen -y -f "$KEY_PATH" > /dev/null 2>&1; then
-            echo "Key validation failed. Debug info:"
-            echo "Key file size: $(wc -c < "$KEY_PATH")"
-            echo "First few lines:"
-            head -3 "$KEY_PATH" || true
-            echo "Last few lines:"  
-            tail -3 "$KEY_PATH" || true
-            echo "Checking for common issues..."
-            if grep -q $'\r' "$KEY_PATH"; then
-              echo "Found Windows line endings"
-            fi
-            exit 1
-          fi
-          
-          mkdir -p infra/infra/keys
+          # Generate public key from private key
           ssh-keygen -y -f "$KEY_PATH" > infra/infra/keys/anabolic.pub
+          echo "Generated public key for Terraform"
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -107,35 +68,20 @@ jobs:
         run: |
           IP=${{ steps.ip.outputs.ip }}
           echo "Deploy to $IP"
-          mkdir -p ~/.ssh
           KEY_PATH=~/.ssh/anabolic
-          write_key() {
-            local content="$1"
-            if printf '%s' "$content" | base64 -d > "$KEY_PATH" 2>/dev/null; then
-              :
-            elif printf '%b' "$content" > "$KEY_PATH" 2>/dev/null; then
-              :
-            else
-              printf '%s' "$content" > "$KEY_PATH"
-            fi
-            sed -i 's/\r$//' "$KEY_PATH" || true
-          }
-          if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
-            write_key "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}"
-          elif [ -n "${{ secrets.LIGHTSAIL_SSH_KEY }}" ]; then
-            write_key "${{ secrets.LIGHTSAIL_SSH_KEY }}"
-          else
-            echo "No LIGHTSAIL_SSH_KEY(_B64) provided" >&2; exit 1
-          fi
-          chmod 600 "$KEY_PATH"
-          ssh-keyscan -H $IP >> ~/.ssh/known_hosts 2>/dev/null || true
+          
           # Wait for SSH to become ready after instance replacement
+          echo "Waiting for SSH connection to be ready..."
           for i in {1..30}; do
             if ssh -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ubuntu@${IP} "echo ok" >/dev/null 2>&1; then
+              echo "SSH connection established"
               break
             fi
-            echo "Waiting for SSH... ($i)"; sleep 5;
+            echo "Waiting for SSH... ($i/30)"
+            sleep 5
           done
+          
+          # Sync files to server
           export RSYNC_RSH="ssh -i $KEY_PATH -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
           rsync -avz infra/infra/stack/ ubuntu@${IP}:/opt/stack/
       - name: Fetch secrets from SSM and start stack
