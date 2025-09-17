@@ -35,6 +35,7 @@ jobs:
           chmod 600 "$KEY_PATH"
           
           # Generate public key from private key
+          mkdir -p infra/infra/keys
           ssh-keygen -y -f "$KEY_PATH" > infra/infra/keys/anabolic.pub
           echo "Generated public key for Terraform"
       - name: Setup Terraform
