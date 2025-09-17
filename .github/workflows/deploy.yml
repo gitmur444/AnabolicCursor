@@ -99,18 +99,37 @@ jobs:
           ssh-keygen -y -f "$KEY_PATH" > ../keys/anabolic.pub
           echo "Public key regenerated:"
           cat ../keys/anabolic.pub
-          echo "Public key fingerprint: $(ssh-keygen -lf ../keys/anabolic.pub | cut -d' ' -f2)"
+          PUBLIC_KEY_FINGERPRINT=$(ssh-keygen -lf ../keys/anabolic.pub | cut -d' ' -f2)
+          echo "Public key fingerprint: $PUBLIC_KEY_FINGERPRINT"
+          
+          # FORCE DELETE old key pair from Lightsail before Terraform
+          echo "=== Force Deleting Old Key Pair ==="
+          aws lightsail delete-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci 2>/dev/null && echo "Deleted anabolic-key-ci" || echo "anabolic-key-ci not found"
+          
+          # Import new key pair with correct fingerprint  
+          echo "=== Creating New Key Pair in Lightsail ==="
+          PUBLIC_KEY_CONTENT=$(cat ../keys/anabolic.pub)
+          echo "Importing public key: $PUBLIC_KEY_CONTENT"
+          
+          if aws lightsail import-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci --public-key-base64 "$(echo "$PUBLIC_KEY_CONTENT" | base64 -w 0)" 2>&1; then
+            echo "✅ Successfully imported key pair to Lightsail"
+            # Verify the imported key fingerprint
+            LIGHTSAIL_FINGERPRINT=$(aws lightsail get-key-pair --region eu-central-1 --key-pair-name anabolic-key-ci --query "keyPair.fingerprint" --output text)
+            echo "Lightsail key fingerprint: $LIGHTSAIL_FINGERPRINT"
+          else
+            echo "❌ Failed to import key pair, Terraform will create it instead"
+          fi
           
           # Show current Lightsail resources before apply
           echo "=== Current Lightsail Resources ==="
           aws lightsail get-instances --region eu-central-1 --query "instances[].{Name:name,State:state.name,KeyName:sshKeyName}" --output table || true
           aws lightsail get-key-pairs --region eu-central-1 --query "keyPairs[].{Name:name,Fingerprint:fingerprint}" --output table || true
           
-          # Recreate instance with a CI-managed key that matches the secret-derived public key
+          # Recreate instance with pre-created key pair
           echo "=== Applying Terraform Configuration ==="
           terraform apply -auto-approve -input=false \
             -var ssh_key_name=anabolic-key-ci \
-            -var create_key_pair=true \
+            -var create_key_pair=false \
             -var create_instance=true \
             -var create_static_ip=false \
             -var existing_static_ip_name=anabolic-litellm-ip
