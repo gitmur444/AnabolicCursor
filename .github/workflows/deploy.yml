@@ -96,13 +96,25 @@ jobs:
           set -e
           terraform init -reconfigure -input=false
           terraform workspace select dev || terraform workspace new dev
+          
+          # Show current Lightsail resources before apply
+          echo "=== Current Lightsail Resources ==="
+          aws lightsail get-instances --region eu-central-1 --query "instances[].{Name:name,State:state.name,KeyName:sshKeyName}" --output table || true
+          aws lightsail get-key-pairs --region eu-central-1 --query "keyPairs[].{Name:name,Fingerprint:fingerprint}" --output table || true
+          
           # Recreate instance with a CI-managed key that matches the secret-derived public key
+          echo "=== Applying Terraform Configuration ==="
           terraform apply -auto-approve -input=false \
             -var ssh_key_name=anabolic-key-ci \
             -var create_key_pair=true \
             -var create_instance=true \
             -var create_static_ip=false \
             -var existing_static_ip_name=anabolic-litellm-ip
+          
+          # Show resources after apply
+          echo "=== Resources After Terraform Apply ==="
+          aws lightsail get-instances --region eu-central-1 --query "instances[].{Name:name,State:state.name,KeyName:sshKeyName}" --output table || true
+          aws lightsail get-key-pairs --region eu-central-1 --query "keyPairs[].{Name:name,Fingerprint:fingerprint}" --output table || true
       - name: Get public IP
         id: ip
         working-directory: infra/infra/terraform
@@ -165,18 +177,43 @@ jobs:
           echo "Deploy to $IP"
           KEY_PATH=~/.ssh/anabolic
           
-          # Wait for SSH to become ready after instance replacement
-          echo "Waiting for SSH connection to be ready..."
-          for i in {1..30}; do
-            if ssh -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ubuntu@${IP} "echo ok" >/dev/null 2>&1; then
-              echo "SSH connection established"
+          # Debug SSH key and Lightsail setup
+          echo "=== SSH Key Debugging ==="
+          echo "Key file exists: $([ -f "$KEY_PATH" ] && echo "YES" || echo "NO")"
+          echo "Key permissions: $(ls -la "$KEY_PATH")"
+          echo "Public key fingerprint: $(ssh-keygen -lf "$KEY_PATH" | cut -d' ' -f2)"
+          
+          # Check Lightsail key pairs
+          echo "=== Lightsail Key Pairs ==="
+          aws lightsail get-key-pairs --region eu-central-1 --query "keyPairs[].{Name:name,Fingerprint:fingerprint}" --output table || echo "Failed to get key pairs"
+          
+          # Check instance key pair assignment
+          echo "=== Instance Key Assignment ==="
+          aws lightsail get-instance --region eu-central-1 --instance-name anabolic-litellm --query "instance.sshKeyName" --output text || echo "Failed to get instance SSH key"
+          
+          # Wait for SSH to become ready with verbose output
+          echo "=== SSH Connection Testing ==="
+          for i in {1..10}; do
+            echo "Attempt $i/10: Testing SSH connection..."
+            if ssh -v -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ubuntu@${IP} "echo ok" 2>&1; then
+              echo "SSH connection established successfully!"
               break
             fi
-            echo "Waiting for SSH... ($i/30)"
-            sleep 5
+            echo "SSH attempt $i failed, waiting 10 seconds..."
+            sleep 10
           done
           
+          # Final connection test before rsync
+          echo "Final SSH test before rsync..."
+          if ! ssh -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 ubuntu@${IP} "echo 'SSH works'" 2>&1; then
+            echo "ERROR: SSH connection failed, cannot proceed with rsync"
+            echo "Trying different SSH options..."
+            ssh -v -i "$KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${IP} "echo 'test'" 2>&1 || true
+            exit 1
+          fi
+          
           # Sync files to server
+          echo "Starting file sync..."
           export RSYNC_RSH="ssh -i $KEY_PATH -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
           rsync -avz infra/infra/stack/ ubuntu@${IP}:/opt/stack/
       - name: Fetch secrets from SSM and start stack
