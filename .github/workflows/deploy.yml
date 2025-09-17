@@ -111,28 +111,50 @@ jobs:
           terraform output || echo "No outputs available"
           
           # Try to get public IP from various sources
-          if IP=$(terraform output -raw public_ip 2>/dev/null) && [ -n "$IP" ]; then
-            echo "Got IP from terraform output: $IP"
-          elif IP=$(terraform show -json | jq -r '.values.outputs.public_ip.value' 2>/dev/null) && [ -n "$IP" ] && [ "$IP" != "null" ]; then
-            echo "Got IP from terraform show: $IP"
-          else
-            echo "Terraform outputs not available, trying AWS CLI..."
-            # Try to get instance IP using AWS CLI
-            INSTANCE_NAME="anabolic-litellm"
-            IP=$(aws lightsail get-instances --region eu-central-1 \
-              --query "instances[?name=='$INSTANCE_NAME'].publicIpAddress" \
-              --output text 2>/dev/null || echo "")
-            
-            if [ -n "$IP" ] && [ "$IP" != "None" ]; then
-              echo "Got IP from AWS Lightsail CLI: $IP"
+          IP=""
+          
+          # Method 1: Try terraform output (check if it's a valid IP, not a warning)
+          if OUTPUT=$(terraform output -raw public_ip 2>/dev/null); then
+            if echo "$OUTPUT" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+              IP="$OUTPUT"
+              echo "Got IP from terraform output: $IP"
             else
-              echo "ERROR: Cannot find public IP from any source"
-              echo "Available terraform outputs:"
-              terraform output -json || echo "No outputs in JSON format"
-              echo "Lightsail instances:"
-              aws lightsail get-instances --region eu-central-1 --query "instances[].{Name:name,State:state.name,IP:publicIpAddress}" --output table || echo "AWS CLI failed"
-              exit 1
+              echo "Terraform output contains warnings/errors, not an IP address"
             fi
+          fi
+          
+          # Method 2: Try terraform show if no IP yet
+          if [ -z "$IP" ]; then
+            if OUTPUT=$(terraform show -json 2>/dev/null | jq -r '.values.outputs.public_ip.value' 2>/dev/null); then
+              if echo "$OUTPUT" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+                IP="$OUTPUT"
+                echo "Got IP from terraform show: $IP"
+              fi
+            fi
+          fi
+          
+          # Method 3: Try AWS CLI if still no IP
+          if [ -z "$IP" ]; then
+            echo "Terraform outputs not available, trying AWS CLI..."
+            INSTANCE_NAME="anabolic-litellm"
+            if OUTPUT=$(aws lightsail get-instances --region eu-central-1 \
+              --query "instances[?name=='$INSTANCE_NAME'].publicIpAddress" \
+              --output text 2>/dev/null); then
+              if echo "$OUTPUT" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+                IP="$OUTPUT"
+                echo "Got IP from AWS Lightsail CLI: $IP"
+              fi
+            fi
+          fi
+          
+          # Final check
+          if [ -z "$IP" ]; then
+            echo "ERROR: Cannot find public IP from any source"
+            echo "Available terraform outputs:"
+            terraform output -json 2>/dev/null || echo "No outputs in JSON format"
+            echo "Lightsail instances:"
+            aws lightsail get-instances --region eu-central-1 --query "instances[].{Name:name,State:state.name,IP:publicIpAddress}" --output table 2>/dev/null || echo "AWS CLI failed"
+            exit 1
           fi
           
           echo "ip=$IP" >> $GITHUB_OUTPUT
