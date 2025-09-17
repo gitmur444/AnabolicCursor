@@ -23,18 +23,13 @@ jobs:
           mkdir -p ~/.ssh
           KEY_PATH=~/.ssh/anabolic
           
-          # Write the SSH private key from secrets
+          # Write the SSH private key from base64 encoded secret
           if [ -n "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" ]; then
-            # Decode base64 SSH key
             echo "${{ secrets.LIGHTSAIL_SSH_KEY_B64 }}" | base64 -d > "$KEY_PATH"
             echo "SSH private key decoded from LIGHTSAIL_SSH_KEY_B64"
-          elif [ -n "${{ secrets.LIGHTSAIL_SSH_KEY }}" ]; then
-            # Handle plain text SSH key with potential formatting issues
-            echo "${{ secrets.LIGHTSAIL_SSH_KEY }}" | sed 's/\\n/\n/g' > "$KEY_PATH"
-            sed -i 's/\r$//' "$KEY_PATH" 2>/dev/null || true
-            echo "SSH private key written from LIGHTSAIL_SSH_KEY"
           else
-            echo "ERROR: Neither LIGHTSAIL_SSH_KEY_B64 nor LIGHTSAIL_SSH_KEY found" >&2
+            echo "ERROR: LIGHTSAIL_SSH_KEY_B64 secret not found" >&2
+            echo "Please ensure the base64-encoded SSH private key is stored in LIGHTSAIL_SSH_KEY_B64" >&2
             exit 1
           fi
           
@@ -78,21 +73,9 @@ jobs:
               exit 1
             fi
           else
-            echo "Failed to generate public key. Trying to fix common issues..."
-            
-            # Try different approaches to fix the key
-            echo "Attempting to rewrite key with printf..."
-            printf '%s\n' "${{ secrets.LIGHTSAIL_SSH_KEY }}" > "$KEY_PATH.tmp"
-            chmod 600 "$KEY_PATH.tmp"
-            
-            if ssh-keygen -y -f "$KEY_PATH.tmp" > infra/infra/keys/anabolic.pub 2>&1; then
-              echo "Success with printf method!"
-              mv "$KEY_PATH.tmp" "$KEY_PATH"
-            else
-              echo "Still failed. The SSH key in GitHub Secrets may be corrupted."
-              echo "Please check that the key is properly formatted with proper line breaks."
-              exit 1
-            fi
+            echo "Failed to generate public key from LIGHTSAIL_SSH_KEY_B64"
+            echo "The base64-encoded private key may be corrupted or invalid"
+            exit 1
           fi
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
