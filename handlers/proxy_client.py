@@ -68,6 +68,8 @@ async def proxy_stream(url: str, headers: Dict[str, str], payload: Dict[str, Any
     cancelled_by_client = False
     req_id = None
     processing_ms = None
+    # Aggregator for streaming tool_calls (OpenAI delta tool_calls)
+    tool_calls_agg: Dict[int, Dict[str, Any]] = {}
 
     try:
         async with httpx.AsyncClient(timeout=None) as client:
@@ -131,9 +133,33 @@ async def proxy_stream(url: str, headers: Dict[str, str], payload: Dict[str, Any
                             if chunk_finish_reason:
                                 finish_reason = chunk_finish_reason
                             
-                            # Extract tool calls from streaming chunks
+                            # Extract tool calls from streaming chunks and aggregate by index
                             chunk_tool_calls = extract_tool_calls_from_streaming_chunk(obj)
-                            tool_calls_info.extend(chunk_tool_calls)
+                            if chunk_tool_calls:
+                                for tc in chunk_tool_calls:
+                                    idx = tc.get("index")
+                                    if idx is None:
+                                        # Fallback index if provider does not send index
+                                        idx = max(tool_calls_agg.keys(), default=-1) + 1
+                                    entry = tool_calls_agg.get(idx)
+                                    if entry is None:
+                                        entry = {
+                                            "id": tc.get("id"),
+                                            "type": tc.get("type"),
+                                            "function_name": tc.get("function_name"),
+                                            "function_args": ""
+                                        }
+                                        tool_calls_agg[idx] = entry
+                                    else:
+                                        if not entry.get("id") and tc.get("id"):
+                                            entry["id"] = tc.get("id")
+                                        if not entry.get("type") and tc.get("type"):
+                                            entry["type"] = tc.get("type")
+                                        if not entry.get("function_name") and tc.get("function_name"):
+                                            entry["function_name"] = tc.get("function_name")
+                                    args_piece = tc.get("function_args")
+                                    if isinstance(args_piece, str):
+                                        entry["function_args"] = (entry.get("function_args") or "") + args_piece
 
                             # Extract text content
                             piece = extract_text_from_streaming_chunk(obj, current_event)
@@ -178,6 +204,18 @@ async def proxy_stream(url: str, headers: Dict[str, str], payload: Dict[str, Any
         # If model stopped due to length limit, mark as truncated
         if finish_reason == "length":
             truncated = True
+
+        # Build final tool_calls list from aggregator, preserving index order
+        if tool_calls_agg:
+            tool_calls_info = []
+            for idx in sorted(tool_calls_agg.keys()):
+                e = tool_calls_agg[idx]
+                tool_calls_info.append({
+                    "id": e.get("id"),
+                    "type": e.get("type"),
+                    "function_name": e.get("function_name"),
+                    "function_args": e.get("function_args")
+                })
 
         log_response_event(
             payload=payload,

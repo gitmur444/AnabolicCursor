@@ -92,6 +92,7 @@ def extract_tool_calls_from_streaming_chunk(obj: Dict[str, Any]) -> List[Dict]:
             for tool_call in delta["tool_calls"]:
                 tool_calls_info.append({
                     "id": tool_call.get("id"),
+                    "index": tool_call.get("index"),
                     "type": tool_call.get("type"),
                     "function_name": tool_call.get("function", {}).get("name"),
                     "function_args": tool_call.get("function", {}).get("arguments")
