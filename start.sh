@@ -60,7 +60,7 @@ if ! curl -s http://localhost:8787/ > /dev/null 2>&1; then
     exit 1
 fi
 
-echo "✅ Ready! Cursor Settings URL: $NGROK_URL"
+echo "✅ Ready! Cursor Settings URL: $NGROK_URL/v1"
 echo "⏹️  Stop: Ctrl+C"
 echo
 
